@@ -2299,6 +2299,10 @@ const _origSaveState = typeof saveState === 'function' ? saveState : function(){
 
 async function loadFromCloud(uid){
   return new Promise(resolve=>{
+    // safety timeout - never hang forever
+    let done = false;
+    const finish = (val)=>{ if(!done){ done=true; resolve(val); } };
+    setTimeout(()=>{ console.warn('Cloud load timeout - proceeding offline'); finish(false); }, 8000);
     waitForFB(async ()=>{
       const {db, doc, getDoc} = window._fb;
       try {
@@ -2325,8 +2329,8 @@ async function loadFromCloud(uid){
           merchantOverrides = d.merchantOverrides||{};
           _origSaveTx();
         }
-        resolve(settingsSnap.exists());
-      } catch(e) { console.error('Cloud load error:', e); resolve(false); }
+        finish(settingsSnap.exists());
+      } catch(e) { console.error('Cloud load error:', e); finish(false); }
     });
   });
 }
@@ -2354,10 +2358,15 @@ waitForFB(()=>{
       // load data from cloud
       document.getElementById('screen-auth').innerHTML='<div class="auth-loading"><div class="auth-spinner"></div><span>טוען נתונים...</span></div>';
       document.getElementById('screen-auth').style.display='flex';
-      const hasData = await loadFromCloud(user.uid);
-      // navigate
-      if(state.setupDone){ showDashboard(); }
-      else { initOnboarding(); showScreen('screen-onboarding'); }
+      try { await loadFromCloud(user.uid); } catch(e){ console.error('load err',e); }
+      // navigate (with error guard so we never stay stuck on loading)
+      try {
+        if(state.setupDone){ showDashboard(); }
+        else { initOnboarding(); showScreen('screen-onboarding'); }
+      } catch(e) {
+        console.error('Navigation error:', e);
+        initOnboarding(); showScreen('screen-onboarding');
+      }
     } else {
       currentUser = null;
       document.getElementById('user-bar').style.display='none';
