@@ -11,6 +11,34 @@
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script type="module">
+// ═══════════════════════════
+//  FIREBASE INIT
+// ═══════════════════════════
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBqwMKFXLTF5Iq15FQcurPu1nvPjKzMzO0",
+  authDomain: "personal-financial-assis-1fbe9.firebaseapp.com",
+  projectId: "personal-financial-assis-1fbe9",
+  storageBucket: "personal-financial-assis-1fbe9.firebasestorage.app",
+  messagingSenderId: "359234169677",
+  appId: "1:359234169677:web:6859ff45f7247225fbe504",
+  measurementId: "G-R0YM87TMVQ"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+const db = getFirestore(fbApp);
+const provider = new GoogleAuthProvider();
+
+// expose to window so main script can use
+window._fb = { auth, db, provider, signInWithPopup, signOut, onAuthStateChanged, doc, setDoc, getDoc, onSnapshot };
+window._fbReady = true;
+window.dispatchEvent(new Event('fbReady'));
+</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 :root{
@@ -90,7 +118,7 @@ button{cursor:pointer;}
 
 /* ── DASHBOARD ── */
 #screen-dashboard{padding-bottom:calc(80px + env(safe-area-inset-bottom));}
-.db-topbar{padding:18px 20px 0;display:flex;align-items:center;justify-content:space-between;}
+.db-topbar{padding:58px 20px 0;display:flex;align-items:center;justify-content:space-between;}
 .db-greeting{font-size:20px;font-weight:800;}
 .db-greeting span{color:var(--green);}
 .icon-btn{width:40px;height:40px;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;}
@@ -179,7 +207,7 @@ button{cursor:pointer;}
 
 /* ── UPLOAD SCREEN ── */
 #screen-upload{padding-bottom:calc(80px + env(safe-area-inset-bottom));}
-.upload-header{padding:18px 20px 0;display:flex;align-items:center;gap:12px;}
+.upload-header{padding:58px 20px 0;display:flex;align-items:center;gap:12px;}
 .back-btn{width:40px;height:40px;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;color:var(--text);flex-shrink:0;}
 .page-title{font-size:18px;font-weight:800;}
 
@@ -388,6 +416,27 @@ button{cursor:pointer;}
 .chat-typing span{width:6px;height:6px;background:var(--purple);border-radius:50%;animation:pulse 1s infinite;}
 .chat-typing span:nth-child(2){animation-delay:.2s;}
 .chat-typing span:nth-child(3){animation-delay:.4s;}
+
+/* ── AUTH SCREEN ── */
+#screen-auth{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100dvh;padding:40px 24px;text-align:center;}
+.auth-logo{width:72px;height:72px;background:var(--green-dim);border:1.5px solid var(--green-glow);border-radius:22px;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:34px;}
+.auth-title{font-size:28px;font-weight:800;letter-spacing:-0.5px;margin-bottom:8px;}
+.auth-title span{color:var(--green);}
+.auth-sub{font-size:14px;color:var(--text2);line-height:1.6;margin-bottom:40px;max-width:280px;}
+.btn-google{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;max-width:320px;padding:16px 24px;background:#fff;border:none;border-radius:14px;font-size:16px;font-weight:700;color:#1f1f1f;cursor:pointer;transition:all .2s;box-shadow:0 2px 12px rgba(0,0,0,0.15);}
+.btn-google:active{transform:scale(0.97);}
+.btn-google img{width:22px;height:22px;}
+.auth-loading{display:flex;flex-direction:column;align-items:center;gap:16px;color:var(--text2);font-size:14px;}
+.auth-spinner{width:40px;height:40px;border:3px solid var(--surface3);border-top-color:var(--green);border-radius:50%;animation:spin 0.8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.auth-user-bar{position:fixed;top:env(safe-area-inset-top,0);right:0;left:0;max-width:480px;margin:0 auto;z-index:50;padding:10px 16px;display:flex;align-items:center;gap:10px;background:rgba(14,16,24,0.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);}
+.auth-user-avatar{width:28px;height:28px;border-radius:50%;object-fit:cover;border:1.5px solid var(--green-glow);}
+.auth-user-name{font-size:12px;font-weight:600;flex:1;color:var(--text2);}
+.btn-signout{font-size:11px;color:var(--red);font-weight:600;background:none;border:none;cursor:pointer;padding:4px 8px;}
+.sync-indicator{font-size:10px;color:var(--text3);display:flex;align-items:center;gap:4px;}
+.sync-dot{width:6px;height:6px;border-radius:50%;background:var(--green);}
+.sync-dot.syncing{background:var(--amber);animation:pulse 1s infinite;}
+
 </style>
 </head>
 <body>
@@ -426,6 +475,29 @@ button{cursor:pointer;}
 <div class="modal-overlay" id="reassign-modal" onclick="if(event.target===this)closeReassign()">
   <div class="modal-box">
     <div id="reassign-body"></div>
+  </div>
+</div>
+
+<!-- ═══ AUTH SCREEN ═══ -->
+<div class="screen" id="screen-auth" style="display:flex;align-items:center;justify-content:center;">
+  <div id="auth-content">
+    <div class="auth-logo">💰</div>
+    <div class="auth-title">עוזר <span>פיננסי</span> אישי</div>
+    <div class="auth-sub">כל הנתונים שלך מסונכרנים בין כל המכשירים שלך בצורה מאובטחת</div>
+    <button class="btn-google" onclick="signInWithGoogle()">
+      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
+      המשך עם Google
+    </button>
+  </div>
+</div>
+
+<!-- User bar (shown when logged in) -->
+<div id="user-bar" style="display:none">
+  <div class="auth-user-bar">
+    <img class="auth-user-avatar" id="user-avatar" src="" alt="">
+    <span class="auth-user-name" id="user-name">משתמש</span>
+    <span class="sync-indicator"><span class="sync-dot" id="sync-dot"></span><span id="sync-text">מסונכרן</span></span>
+    <button class="btn-signout" onclick="doSignOut()">יציאה</button>
   </div>
 </div>
 
@@ -2150,12 +2222,161 @@ document.addEventListener('click',function h(){
   document.removeEventListener('click',h);
 },{once:true});
 
-(function(){
-  const ok=loadState();
-  loadTx();
-  if(ok&&state.setupDone){showDashboard();}
-  else{initOnboarding();showScreen('screen-onboarding');}
-})();
+// ── Firebase Auth Integration ──
+let currentUser = null;
+let unsubscribeFirestore = null;
+
+function waitForFB(cb){
+  if(window._fbReady) cb();
+  else window.addEventListener('fbReady', cb, {once:true});
+}
+
+function signInWithGoogle(){
+  const authContent = document.getElementById('auth-content');
+  authContent.innerHTML = '<div class="auth-loading"><div class="auth-spinner"></div><span>מתחבר...</span></div>';
+  waitForFB(async ()=>{
+    const {auth, provider, signInWithPopup} = window._fb;
+    try {
+      await signInWithPopup(auth, provider);
+    } catch(e) {
+      authContent.innerHTML = `
+        <div class="auth-logo">💰</div>
+        <div class="auth-title">עוזר <span>פיננסי</span> אישי</div>
+        <div class="auth-sub" style="color:var(--red)">שגיאה: ${e.message}</div>
+        <button class="btn-google" onclick="signInWithGoogle()">
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg">
+          נסה שוב
+        </button>`;
+    }
+  });
+}
+
+function doSignOut(){
+  if(!confirm('להתנתק?')) return;
+  waitForFB(async ()=>{
+    const {auth, signOut} = window._fb;
+    await signOut(auth);
+  });
+}
+
+function setSyncStatus(status){
+  const dot = document.getElementById('sync-dot');
+  const txt = document.getElementById('sync-text');
+  if(!dot||!txt) return;
+  if(status==='syncing'){dot.className='sync-dot syncing';txt.textContent='שומר...';}
+  else{dot.className='sync-dot';txt.textContent='מסונכרן';}
+}
+
+async function saveToCloud(){
+  if(!currentUser) return;
+  setSyncStatus('syncing');
+  try {
+    waitForFB(async ()=>{
+      const {db, doc, setDoc} = window._fb;
+      const uid = currentUser.uid;
+      await setDoc(doc(db,'users',uid,'data','settings'), {
+        selectedBanks:[...state.selectedBanks],
+        bankInstances:state.bankInstances,
+        selectedCards:[...state.selectedCards],
+        cardInstances:state.cardInstances,
+        startDate:state.startDate,
+        reminder:state.reminder,
+        setupDone:state.setupDone,
+        updatedAt: Date.now()
+      });
+      await setDoc(doc(db,'users',uid,'data','transactions'), {
+        transactions, uploadedFiles, customCategories, merchantOverrides,
+        updatedAt: Date.now()
+      });
+      setSyncStatus('synced');
+    });
+  } catch(e) { console.error('Cloud save error:', e); setSyncStatus('synced'); }
+}
+
+async function loadFromCloud(uid){
+  return new Promise(resolve=>{
+    waitForFB(async ()=>{
+      const {db, doc, getDoc} = window._fb;
+      try {
+        const [settingsSnap, txSnap] = await Promise.all([
+          getDoc(doc(db,'users',uid,'data','settings')),
+          getDoc(doc(db,'users',uid,'data','transactions'))
+        ]);
+        if(settingsSnap.exists()){
+          const s = settingsSnap.data();
+          state.selectedBanks = new Set(s.selectedBanks||[]);
+          state.bankInstances = s.bankInstances||{};
+          state.selectedCards = new Set(s.selectedCards||[]);
+          state.cardInstances = s.cardInstances||{};
+          state.startDate = s.startDate||'2026-01';
+          state.reminder = s.reminder||'biweekly';
+          state.setupDone = s.setupDone||false;
+          saveState();
+        }
+        if(txSnap.exists()){
+          const d = txSnap.data();
+          transactions = d.transactions||[];
+          uploadedFiles = d.uploadedFiles||[];
+          customCategories = d.customCategories||{};
+          merchantOverrides = d.merchantOverrides||{};
+          saveTx();
+        }
+        resolve(settingsSnap.exists());
+      } catch(e) { console.error('Cloud load error:', e); resolve(false); }
+    });
+  });
+}
+
+// Override saveTx and saveState to also sync to cloud
+const _origSaveTx = saveTx;
+window.saveTx = function(){
+  _origSaveTx();
+  if(currentUser) saveToCloud();
+};
+const _origSaveState = saveState;
+window.saveState = function(){
+  _origSaveState();
+  if(currentUser) saveToCloud();
+};
+
+// Auth state listener
+waitForFB(()=>{
+  const {auth, onAuthStateChanged} = window._fb;
+  onAuthStateChanged(auth, async (user)=>{
+    if(user){
+      currentUser = user;
+      // show user bar
+      document.getElementById('user-bar').style.display='block';
+      document.getElementById('user-avatar').src = user.photoURL||'';
+      document.getElementById('user-name').textContent = user.displayName||user.email;
+      // load data from cloud
+      document.getElementById('screen-auth').innerHTML='<div class="auth-loading"><div class="auth-spinner"></div><span>טוען נתונים...</span></div>';
+      document.getElementById('screen-auth').style.display='flex';
+      const hasData = await loadFromCloud(user.uid);
+      // navigate
+      if(state.setupDone){ showDashboard(); }
+      else { initOnboarding(); showScreen('screen-onboarding'); }
+    } else {
+      currentUser = null;
+      document.getElementById('user-bar').style.display='none';
+      // show auth screen
+      document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+      const authScreen = document.getElementById('screen-auth');
+      authScreen.classList.add('active');
+      authScreen.style.display='';
+      authScreen.innerHTML = `
+        <div id="auth-content">
+          <div class="auth-logo">💰</div>
+          <div class="auth-title">עוזר <span>פיננסי</span> אישי</div>
+          <div class="auth-sub">כל הנתונים שלך מסונכרנים בין כל המכשירים שלך בצורה מאובטחת</div>
+          <button class="btn-google" onclick="signInWithGoogle()">
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
+            המשך עם Google
+          </button>
+        </div>`;
+    }
+  });
+});
 
 
 // ═══════════════════════════
