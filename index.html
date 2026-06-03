@@ -1129,6 +1129,9 @@ function finishSetup(){
 // ═══════════════════════════
 function showScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  // clear auth screen's inline display so it doesn't overlay
+  const authScr = document.getElementById('screen-auth');
+  if(authScr && id !== 'screen-auth') authScr.style.display='none';
   document.getElementById(id).classList.add('active');
   window.scrollTo(0,0);
 }
@@ -2302,7 +2305,7 @@ async function loadFromCloud(uid){
     // safety timeout - never hang forever
     let done = false;
     const finish = (val)=>{ if(!done){ done=true; resolve(val); } };
-    setTimeout(()=>{ console.warn('Cloud load timeout - proceeding offline'); finish(false); }, 8000);
+    setTimeout(()=>{ console.warn('Cloud load timeout - proceeding offline'); finish(false); }, 5000);
     waitForFB(async ()=>{
       const {db, doc, getDoc} = window._fb;
       try {
@@ -2358,14 +2361,17 @@ waitForFB(()=>{
       // load data from cloud
       document.getElementById('screen-auth').innerHTML='<div class="auth-loading"><div class="auth-spinner"></div><span>טוען נתונים...</span></div>';
       document.getElementById('screen-auth').style.display='flex';
+      // Load cloud data (with timeout safety), then navigate
       try { await loadFromCloud(user.uid); } catch(e){ console.error('load err',e); }
       // navigate (with error guard so we never stay stuck on loading)
       try {
+        document.getElementById('screen-auth').style.display='none';
         if(state.setupDone){ showDashboard(); }
         else { initOnboarding(); showScreen('screen-onboarding'); }
       } catch(e) {
         console.error('Navigation error:', e);
-        initOnboarding(); showScreen('screen-onboarding');
+        document.getElementById('screen-auth').style.display='none';
+        try{ initOnboarding(); showScreen('screen-onboarding'); }catch(e2){ console.error(e2); }
       }
     } else {
       currentUser = null;
