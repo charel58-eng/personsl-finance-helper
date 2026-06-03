@@ -2293,6 +2293,10 @@ async function saveToCloud(){
   } catch(e) { console.error('Cloud save error:', e); setSyncStatus('synced'); }
 }
 
+// Save original functions before overriding
+const _origSaveTx = typeof saveTx === 'function' ? saveTx : function(){};
+const _origSaveState = typeof saveState === 'function' ? saveState : function(){};
+
 async function loadFromCloud(uid){
   return new Promise(resolve=>{
     waitForFB(async ()=>{
@@ -2311,7 +2315,7 @@ async function loadFromCloud(uid){
           state.startDate = s.startDate||'2026-01';
           state.reminder = s.reminder||'biweekly';
           state.setupDone = s.setupDone||false;
-          saveState();
+          _origSaveState();
         }
         if(txSnap.exists()){
           const d = txSnap.data();
@@ -2319,7 +2323,7 @@ async function loadFromCloud(uid){
           uploadedFiles = d.uploadedFiles||[];
           customCategories = d.customCategories||{};
           merchantOverrides = d.merchantOverrides||{};
-          saveTx();
+          _origSaveTx();
         }
         resolve(settingsSnap.exists());
       } catch(e) { console.error('Cloud load error:', e); resolve(false); }
@@ -2328,12 +2332,10 @@ async function loadFromCloud(uid){
 }
 
 // Override saveTx and saveState to also sync to cloud
-const _origSaveTx = saveTx;
 window.saveTx = function(){
   _origSaveTx();
   if(currentUser) saveToCloud();
 };
-const _origSaveState = saveState;
 window.saveState = function(){
   _origSaveState();
   if(currentUser) saveToCloud();
