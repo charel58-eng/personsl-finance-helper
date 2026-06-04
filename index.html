@@ -45,10 +45,12 @@ window.dispatchEvent(new Event('fbReady'));
 // ═══════════════════════════════════════════════
 //  1. הדבק את מפתח ה-API של Anthropic בין הגרשיים (מתחיל ב-sk-ant-)
 //  2. שנה את סיסמת הכניסה אם תרצה
-const ANTHROPIC_API_KEY = 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;
+const ANTHROPIC_API_KEY = "PASTE_YOUR_API_KEY_HERE";
 const APP_PASSWORD = "hrhr1978";
+const APP_VERSION = "1.0";
 window.ANTHROPIC_API_KEY = ANTHROPIC_API_KEY;
 window.APP_PASSWORD = APP_PASSWORD;
+window.APP_VERSION = APP_VERSION;
 // ═══════════════════════════════════════════════
 </script>
 <style>
@@ -520,7 +522,7 @@ button{cursor:pointer;}
 </div>
 
 <!-- ═══ AUTH SCREEN ═══ -->
-<div class="screen" id="screen-auth" style="display:flex;align-items:center;justify-content:center;">
+<div class="screen" id="screen-auth" style="display:none;align-items:center;justify-content:center;">
   <div id="auth-content">
     <div class="auth-logo">💰</div>
     <div class="auth-title">עוזר <span>פיננסי</span> אישי</div>
@@ -538,6 +540,7 @@ button{cursor:pointer;}
     <img class="auth-user-avatar" id="user-avatar" src="" alt="">
     <span class="auth-user-name" id="user-name">משתמש</span>
     <span class="sync-indicator"><span class="sync-dot" id="sync-dot"></span><span id="sync-text">מסונכרן</span></span>
+    <span id="version-badge" style="font-size:9px;color:var(--text3);padding:2px 6px;background:var(--surface3);border-radius:6px;">v—</span>
     <button class="btn-signout" onclick="doSignOut()">יציאה</button>
   </div>
 </div>
@@ -759,6 +762,8 @@ button{cursor:pointer;}
     <div class="settings-section-label">אזור מסוכן</div>
     <button class="btn-danger" onclick="resetSetup()">🔄 איפוס והגדרה מחדש</button>
   </div>
+
+  <div style="text-align:center;padding:16px;font-size:11px;color:var(--text3);" id="settings-version">גרסה —</div>
 
   <div class="bottom-nav">
     <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
@@ -2441,6 +2446,7 @@ function renderSettings(){
   }).join('');}
 
   renderNotesArchive();
+  const sv=document.getElementById('settings-version'); if(sv) sv.textContent='עוזר פיננסי אישי · גרסה '+APP_VERSION;
 }
 
 function setCardBankLink(cardKey, bankKey){
@@ -2675,12 +2681,35 @@ function checkPassword(){
   const err=document.getElementById('pw-error');
   if(inp.value===APP_PASSWORD){
     sessionStorage.setItem('pw_ok','1');
-    document.getElementById('screen-password').style.display='none';
+    const ps=document.getElementById('screen-password');
+    if(ps){ ps.style.display='none'; ps.remove(); }
+    showAuthScreen();
     startAuthFlow();
   } else {
     err.textContent='סיסמה שגויה';
     inp.value='';
     inp.focus();
+  }
+}
+
+// Show the Google login screen
+function showAuthScreen(){
+  const authScreen = document.getElementById('screen-auth');
+  if(!authScreen) return;
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  authScreen.classList.add('active');
+  authScreen.style.display='flex';
+  if(!document.getElementById('auth-content')){
+    authScreen.innerHTML = `
+      <div id="auth-content">
+        <div class="auth-logo">💰</div>
+        <div class="auth-title">עוזר <span>פיננסי</span> אישי</div>
+        <div class="auth-sub">כל הנתונים שלך מסונכרנים בין כל המכשירים שלך בצורה מאובטחת</div>
+        <button class="btn-google" onclick="signInWithGoogle()">
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
+          המשך עם Google
+        </button>
+      </div>`;
   }
 }
 
@@ -2694,30 +2723,16 @@ function startAuthFlow(){
       document.getElementById('user-bar').style.display='block';
       document.getElementById('user-avatar').src = user.photoURL||'';
       document.getElementById('user-name').textContent = user.displayName||user.email;
-      document.getElementById('screen-auth').innerHTML='<div class="auth-loading"><div class="auth-spinner"></div><span>טוען נתונים...</span></div>';
-      document.getElementById('screen-auth').style.display='flex';
-      // Load cloud data (timeout-protected), then navigate no matter what
+      const vb=document.getElementById('version-badge'); if(vb) vb.textContent='v'+APP_VERSION;
+      const as=document.getElementById('screen-auth');
+      if(as){ as.innerHTML='<div class="auth-loading"><div class="auth-spinner"></div><span>טוען נתונים...</span></div>'; as.style.display='flex'; }
       await loadFromCloud(user.uid).catch(()=>{});
       if(state.setupDone){ exitAuthTo(showDashboard); }
       else { exitAuthTo(()=>{ initOnboarding(); showScreen('screen-onboarding'); }); }
     } else {
       currentUser = null;
       document.getElementById('user-bar').style.display='none';
-      // show auth screen
-      document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-      const authScreen = document.getElementById('screen-auth');
-      authScreen.classList.add('active');
-      authScreen.style.display='';
-      authScreen.innerHTML = `
-        <div id="auth-content">
-          <div class="auth-logo">💰</div>
-          <div class="auth-title">עוזר <span>פיננסי</span> אישי</div>
-          <div class="auth-sub">כל הנתונים שלך מסונכרנים בין כל המכשירים שלך בצורה מאובטחת</div>
-          <button class="btn-google" onclick="signInWithGoogle()">
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
-            המשך עם Google
-          </button>
-        </div>`;
+      showAuthScreen();
     }
   });
  });
@@ -2725,7 +2740,9 @@ function startAuthFlow(){
 
 // If password already entered this session, skip the gate
 if(sessionStorage.getItem('pw_ok')==='1'){
-  document.getElementById('screen-password').style.display='none';
+  const ps=document.getElementById('screen-password');
+  if(ps){ ps.style.display='none'; ps.remove(); }
+  showAuthScreen();
   startAuthFlow();
 }
 
