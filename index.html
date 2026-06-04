@@ -39,6 +39,18 @@ window._fb = { auth, db, provider, signInWithPopup, signOut, onAuthStateChanged,
 window._fbReady = true;
 window.dispatchEvent(new Event('fbReady'));
 </script>
+<script>
+// ═══════════════════════════════════════════════
+//  ⚙️ הגדרות אפליקציה — ערוך כאן
+// ═══════════════════════════════════════════════
+//  1. הדבק את מפתח ה-API של Anthropic בין הגרשיים (מתחיל ב-sk-ant-)
+//  2. שנה את סיסמת הכניסה אם תרצה
+const ANTHROPIC_API_KEY = "PASTE_YOUR_API_KEY_HERE";
+const APP_PASSWORD = "hrhr1978";
+window.ANTHROPIC_API_KEY = ANTHROPIC_API_KEY;
+window.APP_PASSWORD = APP_PASSWORD;
+// ═══════════════════════════════════════════════
+</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 :root{
@@ -437,9 +449,38 @@ button{cursor:pointer;}
 .sync-dot{width:6px;height:6px;border-radius:50%;background:var(--green);}
 .sync-dot.syncing{background:var(--amber);animation:pulse 1s infinite;}
 
+
+/* ── UPLOAD ACCOUNT PICKER ── */
+.upload-account-picker{margin:0 16px 16px;}
+.upload-account-label{display:block;font-size:13px;font-weight:600;color:var(--text2);margin-bottom:8px;}
+.upload-account-select{width:100%;padding:14px 16px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:12px;font-size:15px;font-weight:600;color:var(--text);font-family:'Heebo',sans-serif;cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:left 14px center;}
+.upload-account-select:focus{border-color:var(--green);}
+
+
+/* ── PASSWORD GATE ── */
+#screen-password{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100dvh;padding:40px 24px;text-align:center;position:fixed;inset:0;z-index:500;background:var(--bg);}
+.pw-logo{width:72px;height:72px;background:var(--green-dim);border:1.5px solid var(--green-glow);border-radius:22px;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:34px;}
+.pw-title{font-size:24px;font-weight:800;margin-bottom:8px;}
+.pw-sub{font-size:14px;color:var(--text2);margin-bottom:32px;}
+.pw-input{width:100%;max-width:280px;padding:16px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:14px;font-size:18px;text-align:center;color:var(--text);font-family:'Heebo',sans-serif;letter-spacing:4px;margin-bottom:16px;}
+.pw-input:focus{border-color:var(--green);}
+.pw-btn{width:100%;max-width:280px;padding:15px;background:var(--green-dim);border:1.5px solid var(--green);border-radius:14px;font-size:16px;font-weight:700;color:var(--green);cursor:pointer;font-family:'Heebo',sans-serif;}
+.pw-btn:active{transform:scale(0.97);}
+.pw-error{color:var(--red);font-size:13px;margin-bottom:12px;min-height:18px;}
+
 </style>
 </head>
 <body>
+<!-- ═══ PASSWORD GATE ═══ -->
+<div id="screen-password">
+  <div class="pw-logo">🔒</div>
+  <div class="pw-title">עוזר פיננסי אישי</div>
+  <div class="pw-sub">הזן סיסמה כדי להיכנס</div>
+  <div class="pw-error" id="pw-error"></div>
+  <input type="password" class="pw-input" id="pw-input" placeholder="••••••"
+    onkeydown="if(event.key==='Enter')checkPassword()" autofocus>
+  <button class="pw-btn" onclick="checkPassword()">כניסה</button>
+</div>
 <div class="bg-mesh"></div>
 <div class="toast" id="toast"></div>
 
@@ -635,7 +676,6 @@ button{cursor:pointer;}
 
   <div class="bottom-nav">
     <div class="nav-item active" id="nav-home" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
-    <div class="nav-item" id="nav-upload" onclick="showUpload()"><div class="nav-icon">📤</div><div class="nav-label">העלאה</div></div>
     <div class="nav-item" id="nav-reports" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
     <div class="nav-item" id="nav-chat" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
     <div class="nav-item" id="nav-settings" onclick="showSettings()"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
@@ -649,16 +689,18 @@ button{cursor:pointer;}
     <div class="page-title">📤 העלאת קובץ</div>
   </div>
 
+  <div class="upload-account-picker">
+    <label class="upload-account-label">לאיזה חשבון שייך הקובץ?</label>
+    <select class="upload-account-select" id="upload-account-select">
+      <option value="">🔍 זהה אוטומטית (AI)</option>
+    </select>
+  </div>
+
   <div class="drop-zone" id="drop-zone">
     <input type="file" id="file-input" accept=".pdf,.xlsx,.xls,.csv" multiple onchange="handleFiles(this.files)">
     <div class="dz-icon">📂</div>
     <div class="dz-title">בחר קובץ להעלאה</div>
     <div class="dz-sub">גרור לכאן או לחץ לבחירה</div>
-    <div class="dz-formats">
-      <span class="fmt-badge pdf">PDF</span>
-      <span class="fmt-badge excel">Excel</span>
-      <span class="fmt-badge csv">CSV</span>
-    </div>
   </div>
 
   <div class="file-queue" id="file-queue"></div>
@@ -690,6 +732,10 @@ button{cursor:pointer;}
     <div id="settings-cards"></div>
   </div>
   <div class="settings-section">
+    <div class="settings-section-label">📋 ארכיון הערות</div>
+    <div id="settings-notes"></div>
+  </div>
+  <div class="settings-section">
     <div class="settings-section-label">כללי</div>
     <div class="settings-row">
       <div class="settings-row-header">
@@ -716,7 +762,6 @@ button{cursor:pointer;}
 
   <div class="bottom-nav">
     <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
-    <div class="nav-item" onclick="showUpload()"><div class="nav-icon">📤</div><div class="nav-label">העלאה</div></div>
     <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
     <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
     <div class="nav-item active"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
@@ -799,7 +844,6 @@ button{cursor:pointer;}
 
   <div class="bottom-nav">
     <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
-    <div class="nav-item" onclick="showUpload()"><div class="nav-icon">📤</div><div class="nav-label">העלאה</div></div>
     <div class="nav-item active"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
     <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
     <div class="nav-item" onclick="showSettings()"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
@@ -843,7 +887,12 @@ let state = {
   startDate: '2026-01',
   reminder: 'biweekly',
   setupDone: false,
+  cardBankLinks: {},   // {cardKey: bankKey} — which bank account each card is charged to
+  verifiedMonths: {},  // {accountKey: ['2026-01', ...]} — months that passed balance/charge checks
 };
+
+// notesArchive: [{id, accountKey, type:'logo'|'balance'|'card_charge', severity:'info'|'warn'|'severe', text, date, resolved}]
+let notesArchive = [];
 
 // transactions: [{id, accountKey, accountType, date, desc, amount, category, source}]
 let transactions = [];
@@ -871,6 +920,8 @@ function saveState() {
     startDate:state.startDate,
     reminder:state.reminder,
     setupDone:state.setupDone,
+    cardBankLinks:state.cardBankLinks||{},
+    verifiedMonths:state.verifiedMonths||{},
   };
   try{localStorage.setItem(STORAGE_KEY,JSON.stringify(s));}catch(e){}
 }
@@ -886,10 +937,12 @@ function loadState() {
     state.startDate=s.startDate||'2026-01';
     state.reminder=s.reminder||'biweekly';
     state.setupDone=s.setupDone||false;
+    state.cardBankLinks=s.cardBankLinks||{};
+    state.verifiedMonths=s.verifiedMonths||{};
     return true;
   }catch(e){return false;}
 }
-function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides}));}catch(e){}}
+function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,notesArchive}));}catch(e){}}
 function loadTx(){
   try{
     const raw=localStorage.getItem(TRANSACTIONS_KEY);
@@ -899,6 +952,7 @@ function loadTx(){
     uploadedFiles=d.uploadedFiles||[];
     customCategories=d.customCategories||{};
     merchantOverrides=d.merchantOverrides||{};
+    notesArchive=d.notesArchive||[];
   }catch(e){}
 }
 
@@ -1239,11 +1293,11 @@ function changeMonth(d){currentMonth.setMonth(currentMonth.getMonth()+d);renderD
 // ═══════════════════════════
 function showUploadForAccount(key){
   showUpload();
-  // pre-select account
+  // pre-select account in dropdown
   setTimeout(()=>{
-    const opts=document.querySelectorAll('.assign-opt');
-    opts.forEach(o=>{if(o.dataset.key===key)o.click();});
-  },200);
+    const sel=document.getElementById('upload-account-select');
+    if(sel) sel.value=key;
+  },150);
 }
 
 function renderUploadScreen(){
@@ -1251,6 +1305,13 @@ function renderUploadScreen(){
   document.getElementById('file-queue').innerHTML='';
   document.getElementById('ai-processing').classList.remove('visible');
   document.getElementById('analysis-result').classList.remove('visible');
+  // populate account dropdown
+  const sel=document.getElementById('upload-account-select');
+  if(sel){
+    const accounts=getAllAccounts();
+    sel.innerHTML='<option value="">🔍 זהה אוטומטית (AI)</option>'+
+      accounts.map(a=>`<option value="${a.key}">${a.icon} ${a.name}</option>`).join('');
+  }
   // drag-drop
   const dz=document.getElementById('drop-zone');
   dz.ondragover=e=>{e.preventDefault();dz.classList.add('drag-over');};
@@ -1259,11 +1320,13 @@ function renderUploadScreen(){
 }
 
 function handleFiles(files){
+  const sel=document.getElementById('upload-account-select');
+  const preselectedKey=sel?sel.value:'';
   [...files].forEach(file=>{
     const ext=file.name.split('.').pop().toLowerCase();
     if(!['pdf','xlsx','xls','csv'].includes(ext)){showToast('❌ פורמט לא נתמך: '+ext,'error');return;}
     const fileId='f_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
-    const pf={file, fileId, detectedAccount:null, assignedKey:null};
+    const pf={file, fileId, detectedAccount:null, assignedKey:null, preselectedKey:preselectedKey||null};
     pendingFiles.push(pf);
     renderFileItem(pf, ext);
     analyzeFile(pf, ext);
@@ -1372,6 +1435,13 @@ async function analyzeFile(pf, ext){
   // ── AI Analysis via Anthropic API ──
   try {
     const result = await analyzeWithAI(pf, ext, fileContent);
+    // If user preselected an account in the dropdown, force it
+    if(pf.preselectedKey){
+      result.detectedAccount = pf.preselectedKey;
+      result.ambiguous = false;
+      result.ambiguousReason = null;
+      result.confidence = 'high';
+    }
     renderAssignUI(pf, result, getAllAccounts(), assignDiv);
   } catch(e) {
     console.error('AI analysis failed:', e);
@@ -1416,7 +1486,12 @@ ${contentForAI}
   "detectedLast4": "4 ספרות אחרונות שזוהו בקובץ, או null",
   "openingBalance": מספר או null,
   "closingBalance": מספר או null,
+  "firstDate": "YYYY-MM-DD של הפעולה הראשונה בקובץ או null",
+  "lastDate": "YYYY-MM-DD של הפעולה האחרונה בקובץ או null",
   "coveredMonths": ["YYYY-MM", ...],
+  "cardChargesInBank": [
+    {"date":"YYYY-MM-DD","cardName":"שם הכרטיס שחויב","amount":מספר חיובי}
+  ],
   "transactions": [
     {
       "date": "YYYY-MM-DD",
@@ -1438,11 +1513,18 @@ ${contentForAI}
 2. זהה הוצאות כסכום שלילי, הכנסות כחיובי
 3. coveredMonths = רשימת כל החודשים שיש בקובץ (YYYY-MM)
 4. אם detectedLast4 מופיע בחשבון רשום — התאם confidence=high
-5. החזר JSON תקין בלבד`;
+5. openingBalance = היתרה לפני הפעולה הראשונה; closingBalance = היתרה אחרי הפעולה האחרונה
+6. cardChargesInBank = רק אם זה דף בנק: כל החיובים שנראים כחיוב כרטיס אשראי (ויזה/מאסטרקארד/ישראכרט/מקס/כאל/דיינרס/אמקס), כולל חיובי חו"ל נפרדים
+7. החזר JSON תקין בלבד`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 4000,
@@ -1490,6 +1572,12 @@ ${contentForAI}
       openingBalance: parsed.openingBalance || 0,
       closingBalance: parsed.closingBalance || 0,
     },
+    openingBalance: parsed.openingBalance ?? null,
+    closingBalance: parsed.closingBalance ?? null,
+    firstDate: parsed.firstDate || null,
+    lastDate: parsed.lastDate || null,
+    detectedLast4: parsed.detectedLast4 || null,
+    cardChargesInBank: parsed.cardChargesInBank || [],
     insights: parsed.insights || [],
     gaps: [],
     confidence: parsed.confidence || 'low',
@@ -1578,21 +1666,139 @@ function assignFile(fileId, accountKey, el){
   if(btn)btn.disabled=false;
 }
 
+// ═══════════════════════════
+//  VALIDATION ENGINE (5 checks)
+// ═══════════════════════════
+function addNote(accountKey, type, severity, text){
+  notesArchive.push({
+    id:'note_'+Date.now()+'_'+Math.random().toString(36).slice(2,5),
+    accountKey, type, severity, text,
+    date:new Date().toISOString().slice(0,10),
+    resolved:false
+  });
+  saveTx();
+}
+
+function accountName(key){
+  const a=getAllAccounts().find(x=>x.key===key);
+  return a?a.name:key;
+}
+
+// CHECK 1 — bank/card logo/name match
+function checkLogoMatch(result, accountKey){
+  const acc=getAllAccounts().find(a=>a.key===accountKey);
+  if(!acc) return {ok:true};
+  const detected=(result.bankOrCardName||'').toLowerCase();
+  if(!detected) return {ok:true};
+  const entity=acc.entityId;
+  const known={
+    leumi:['leumi','לאומי'], hapoalim:['hapoalim','הפועלים','פועלים'],
+    discount:['discount','דיסקונט'], mizrahi:['mizrahi','מזרחי','טפחות'],
+    yahav:['yahav','יהב'], otzar:['otzar','אוצר'],
+    visa_cal:['cal','כאל','כ.א.ל','ויזה'], mastercard:['mastercard','מאסטרקארד','מסטרקארד'],
+    max:['max','מקס'], isracard:['isracard','ישראכרט','ישראכארט'],
+    amex:['amex','אמריקן'], diners:['diners','דיינרס']
+  };
+  const kws=known[entity]||[];
+  const matches=kws.some(k=>detected.includes(k.toLowerCase()));
+  if(matches) return {ok:true};
+  return {ok:false, detected:result.bankOrCardName};
+}
+
+// CHECK 2 — bank balance continuity
+function checkBalanceContinuity(result, accountKey){
+  const acc=getAllAccounts().find(a=>a.key===accountKey);
+  if(!acc||acc.type!=='bank') return {ok:true};
+  if(result.openingBalance==null) return {ok:true};
+  const existing=transactions
+    .filter(t=>t.accountKey===accountKey && t.balance!=null && t.date)
+    .sort((a,b)=>a.date.localeCompare(b.date));
+  if(existing.length===0) return {ok:true};
+  const lastKnown=existing[existing.length-1];
+  const gap=Math.round((result.openingBalance - lastKnown.balance)*100)/100;
+  if(Math.abs(gap)<1) return {ok:true};
+  return {ok:false, gap, lastKnownBalance:lastKnown.balance, lastKnownDate:lastKnown.date, fileOpeningBalance:result.openingBalance};
+}
+
+// CHECK 3 — credit card charges vs bank
+function checkCardChargeMatch(result, accountKey){
+  const acc=getAllAccounts().find(a=>a.key===accountKey);
+  if(!acc||acc.type!=='card') return {ok:true};
+  const linkedBank=state.cardBankLinks[accountKey];
+  if(!linkedBank) return {ok:true, noLink:true};
+  const cardTotal=(result.allTransactions||[])
+    .filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const cardEntity=acc.entityId;
+  const cardKws={visa_cal:['כאל','כ.א.ל','ויזה','cal'],mastercard:['מאסטרקארד','מסטרקארד','mastercard'],
+    max:['מקס','max'],isracard:['ישראכרט','ישראכארט','isracard'],amex:['אמריקן','amex'],diners:['דיינרס','diners']}[cardEntity]||[];
+  const months=result.coveredMonths||[];
+  const bankCharges=transactions.filter(t=>
+    t.accountKey===linkedBank && t.amount<0 &&
+    months.some(m=>(t.date||'').startsWith(m)) &&
+    cardKws.some(k=>(t.desc||'').toLowerCase().includes(k.toLowerCase()))
+  );
+  const bankTotal=bankCharges.reduce((s,t)=>s+Math.abs(t.amount),0);
+  if(bankCharges.length===0) return {ok:true, noBankData:true};
+  const gap=Math.round((cardTotal-bankTotal)*100)/100;
+  if(Math.abs(gap)<1) return {ok:true, cardTotal, bankTotal};
+  const monthVerified=months.some(m=>(state.verifiedMonths[linkedBank]||[]).includes(m));
+  return {ok:false, gap, cardTotal, bankTotal, severe:monthVerified, linkedBank};
+}
+
+// Run all checks → list of issues
+function runValidations(result, accountKey){
+  const issues=[];
+  const c1=checkLogoMatch(result, accountKey);
+  if(!c1.ok) issues.push({type:'logo', severity:'warn',
+    text:`הקובץ זוהה כ"${c1.detected}" אך נבחר חשבון ${accountName(accountKey)}. ייתכן שזה החשבון הלא נכון.`});
+  const c2=checkBalanceContinuity(result, accountKey);
+  if(!c2.ok) issues.push({type:'balance', severity:'warn',
+    text:`פער ביתרות: היתרה האחרונה הידועה (${c2.lastKnownDate}) ${fmtAmount(c2.lastKnownBalance)}, אך הקובץ נפתח ב-${fmtAmount(c2.fileOpeningBalance)}. פער ${fmtAmount(c2.gap)}.`,
+    gap:c2.gap});
+  const c3=checkCardChargeMatch(result, accountKey);
+  if(!c3.ok) issues.push({type:'card_charge', severity:c3.severe?'severe':'warn',
+    text:`חיובי כרטיס: סך החיובים בכרטיס (${fmtAmount(c3.cardTotal)}) לא תואם לחיובים בבנק (${fmtAmount(c3.bankTotal)}). פער ${fmtAmount(c3.gap)}.${c3.severe?' ⚠️ חודש זה כבר אומת בבנק!':''}`,
+    gap:c3.gap, severe:c3.severe});
+  if(c3.ok && c3.cardTotal!=null && !c3.noBankData && !c3.noLink){
+    (result.coveredMonths||[]).forEach(m=>{
+      const lb=state.cardBankLinks[accountKey];
+      if(lb){ state.verifiedMonths[lb]=state.verifiedMonths[lb]||[]; if(!state.verifiedMonths[lb].includes(m)) state.verifiedMonths[lb].push(m); }
+    });
+  }
+  return issues;
+}
+
 async function confirmUpload(fileId){
   const pf=pendingFiles.find(f=>f.fileId===fileId);
   if(!pf||!pf.assignedKey){showToast('⚠️ בחר חשבון תחילה','error');return;}
   const result=pf.aiResult||{};
+
+  // ── Run validations (unless already acknowledged) ──
+  if(!pf.validationsAcked){
+    const issues=runValidations(result, pf.assignedKey);
+    if(issues.length>0){
+      showValidationIssues(pf, issues);
+      return; // wait for user to resolve/acknowledge
+    }
+  }
+
   const dr=result.estimatedDateRange||{from:getCurrentYYYYMM(),to:getCurrentYYYYMM()};
-  // covered months: prefer explicit list, else derive from range
   let covered=result.coveredMonths&&result.coveredMonths.length?result.coveredMonths:getMonthsBetween(dr.from,dr.to);
 
   uploadedFiles.push({fileId:pf.fileId,accountKey:pf.assignedKey,dateRange:dr,coveredMonths:covered,txCount:(result.summary?.txCount||0),fileName:pf.file.name,summary:result.summary||{}});
 
-  // Use allTransactions (full list from AI) or fall back to sampleTransactions
   const txList = result.allTransactions?.length ? result.allTransactions : (result.sampleTransactions||[]);
   txList.forEach((t,i)=>{
     transactions.push({id:pf.fileId+'_'+i,accountKey:pf.assignedKey,date:t.date||dr.from+'-01',desc:t.desc||'פעולה',amount:t.amount||0,balance:t.balance||null,category:categorize(t.desc||''),source:pf.file.name});
   });
+
+  // Add adjustment row if user provided one (from unresolved balance gap)
+  if(pf.adjustmentRow){
+    transactions.push({id:pf.fileId+'_adj',accountKey:pf.assignedKey,date:pf.adjustmentRow.date,
+      desc:pf.adjustmentRow.desc,amount:pf.adjustmentRow.amount,balance:null,category:'other',source:'התאמה ידנית',isAdjustment:true});
+  }
+
+  saveState();
   saveTx();
   const found=discoverCategories();
 
@@ -1601,6 +1807,64 @@ async function confirmUpload(fileId){
   const mCount=covered.length;
   showToast(`✅ נשמר! ${mCount} חודשים נקלטו${found.length?` · ${found.length} קטגוריות חדשות`:''}`);
   if(pendingFiles.length===0) setTimeout(()=>showDashboard(),1300);
+}
+
+// Show validation issues UI — user must resolve before saving
+function showValidationIssues(pf, issues){
+  const assignDiv=document.getElementById('assign_'+pf.fileId);
+  if(!assignDiv) return;
+  const hasSevere=issues.some(i=>i.severity==='severe');
+  const hasBalanceGap=issues.some(i=>i.type==='balance');
+  const issueRows=issues.map(i=>{
+    const color=i.severity==='severe'?'var(--red)':'var(--amber)';
+    const icon=i.severity==='severe'?'🚨':'⚠️';
+    return `<div style="padding:10px;background:var(--surface3);border-right:3px solid ${color};border-radius:8px;margin-bottom:8px;font-size:12px;line-height:1.5;">${icon} ${i.text}</div>`;
+  }).join('');
+
+  assignDiv.innerHTML=`
+    <div style="padding:12px;background:var(--surface2);border-radius:10px;margin-top:8px;">
+      <div style="font-size:13px;font-weight:700;color:var(--amber);margin-bottom:10px;">⚠️ נמצאו אי-התאמות</div>
+      ${issueRows}
+      ${hasBalanceGap?`
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+          <div style="font-size:12px;color:var(--text2);margin-bottom:6px;">אם הפער ידוע לך, הסבר אותו ותיווצר שורת התאמה:</div>
+          <input type="text" id="adj-explain-${pf.fileId}" placeholder="הסבר (למשל: ריבית/עמלה שלא נרשמה)" style="width:100%;padding:10px;background:var(--surface3);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:'Heebo';font-size:13px;margin-bottom:8px;">
+        </div>`:''}
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+        <button class="btn-confirm-upload" onclick="resolveAndSave('${pf.fileId}')" style="flex:1;min-width:140px;">✅ הבנתי, שמור בכל זאת</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px;">${hasSevere?'⚠️ אי-התאמה חמורה — תירשם הערה בארכיון':'תירשם הערה בארכיון ההערות'}</div>
+    </div>`;
+}
+
+// User acknowledged issues → record notes, build adjustment, then save
+function resolveAndSave(fileId){
+  const pf=pendingFiles.find(f=>f.fileId===fileId);
+  if(!pf) return;
+  const result=pf.aiResult||{};
+  const issues=runValidations(result, pf.assignedKey);
+
+  // Record all issues as notes
+  issues.forEach(i=>addNote(pf.assignedKey, i.type, i.severity, i.text));
+
+  // If there's a balance gap and user explained it → create adjustment row
+  const balIssue=issues.find(i=>i.type==='balance');
+  if(balIssue){
+    const explainEl=document.getElementById('adj-explain-'+fileId);
+    const explain=explainEl?explainEl.value.trim():'';
+    if(explain){
+      const dr=result.estimatedDateRange||{from:getCurrentYYYYMM()};
+      pf.adjustmentRow={
+        date:(result.firstDate||dr.from+'-01'),
+        desc:'התאמת יתרה: '+explain,
+        amount:balIssue.gap // gap added as adjustment
+      };
+      addNote(pf.assignedKey, 'balance', 'info', `שורת התאמה נוצרה: ${explain} (${fmtAmount(balIssue.gap)})`);
+    }
+  }
+
+  pf.validationsAcked=true;
+  confirmUpload(fileId);
 }
 
 function categorize(desc){
@@ -2151,17 +2415,63 @@ function renderSettings(){
 
   const cardsDiv=document.getElementById('settings-cards');
   if(state.selectedCards.size===0){cardsDiv.innerHTML='<div class="empty-state" style="padding:12px">לא הוגדרו</div>';}
-  else{cardsDiv.innerHTML=[...state.selectedCards].map(id=>{
+  else{
+    const bankAccounts=getAllAccounts().filter(a=>a.type==='bank');
+    cardsDiv.innerHTML=[...state.selectedCards].map(id=>{
     const c=CREDIT_CARDS.find(x=>x.id===id);
     const insts=state.cardInstances[id]||[];
     return `<div class="settings-row">
       <div class="settings-row-header"><div class="settings-row-name">${c.icon} ${c.name}</div></div>
-      <div class="settings-instances">${insts.map((inst,i)=>`
+      <div class="settings-instances">${insts.map((inst,i)=>{
+        const cardKey=`card_${id}_${inst.id}`;
+        const linkedBank=state.cardBankLinks[cardKey]||'';
+        return `
         <div class="si-row"><span class="si-icon">💳</span><span class="si-name">כרטיס ${i+1}</span>
         <span class="si-digits">${inst.digits?'••••'+inst.digits:'—'}</span>
-        <span class="si-edit" onclick="openDigitsModal('card','${id}','${inst.id}','${c.name} כרטיס ${i+1}')">ערוך</span></div>`).join('')}
+        <span class="si-edit" onclick="openDigitsModal('card','${id}','${inst.id}','${c.name} כרטיס ${i+1}')">ערוך</span></div>
+        <div class="si-row" style="padding-right:24px;">
+          <span class="si-name" style="font-size:12px;color:var(--text2);">🔗 חיוב מחשבון:</span>
+          <select onchange="setCardBankLink('${cardKey}',this.value)" style="flex:1;background:var(--surface3);border:1px solid var(--border2);border-radius:8px;padding:6px 8px;color:var(--text);font-family:'Heebo';font-size:12px;">
+            <option value="">— בחר חשבון —</option>
+            ${bankAccounts.map(b=>`<option value="${b.key}" ${b.key===linkedBank?'selected':''}>${b.icon} ${b.name}</option>`).join('')}
+          </select>
+        </div>`;
+      }).join('')}
       </div></div>`;
   }).join('');}
+
+  renderNotesArchive();
+}
+
+function setCardBankLink(cardKey, bankKey){
+  if(bankKey) state.cardBankLinks[cardKey]=bankKey;
+  else delete state.cardBankLinks[cardKey];
+  saveState();
+  showToast('✅ קישור נשמר');
+}
+
+// ── Notes Archive ──
+function renderNotesArchive(){
+  const div=document.getElementById('settings-notes');
+  if(!div) return;
+  const active=notesArchive.filter(n=>!n.resolved);
+  if(active.length===0){ div.innerHTML='<div class="empty-state" style="padding:12px">אין הערות פעילות ✅</div>'; return; }
+  div.innerHTML=active.slice().reverse().map(n=>{
+    const color=n.severity==='severe'?'var(--red)':n.severity==='warn'?'var(--amber)':'var(--blue)';
+    const icon=n.severity==='severe'?'🚨':n.severity==='warn'?'⚠️':'ℹ️';
+    return `<div class="settings-row" style="border-right:3px solid ${color};">
+      <div style="font-size:12px;line-height:1.5;color:var(--text);margin-bottom:6px;">${icon} ${n.text}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:10px;color:var(--text3);">${accountName(n.accountKey)} · ${n.date}</span>
+        <button onclick="resolveNote('${n.id}')" style="background:var(--surface3);border:1px solid var(--border2);border-radius:8px;padding:5px 12px;font-size:11px;color:var(--text2);font-family:'Heebo';cursor:pointer;">סמן כטופל</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function resolveNote(noteId){
+  const n=notesArchive.find(x=>x.id===noteId);
+  if(n){ n.resolved=true; saveTx(); renderNotesArchive(); showToast('✅ ההערה סומנה כטופלה'); }
 }
 
 // ═══════════════════════════
@@ -2192,8 +2502,8 @@ function saveDigits(){
 function resetSetup(){
   if(!confirm('למחוק את כל ההגדרות והנתונים?'))return;
   try{localStorage.removeItem(STORAGE_KEY);localStorage.removeItem(TRANSACTIONS_KEY);}catch(e){}
-  state={currentStep:0,selectedBanks:new Set(),bankInstances:{},selectedCards:new Set(),cardInstances:{},startDate:'2026-01',reminder:'biweekly',setupDone:false};
-  transactions=[];uploadedFiles=[];pendingFiles=[];customCategories={};merchantOverrides={};
+  state={currentStep:0,selectedBanks:new Set(),bankInstances:{},selectedCards:new Set(),cardInstances:{},startDate:'2026-01',reminder:'biweekly',setupDone:false,cardBankLinks:{},verifiedMonths:{}};
+  transactions=[];uploadedFiles=[];pendingFiles=[];customCategories={};merchantOverrides={};notesArchive=[];
   initOnboarding();showScreen('screen-onboarding');
 }
 
@@ -2285,10 +2595,12 @@ async function saveToCloud(){
         startDate:state.startDate,
         reminder:state.reminder,
         setupDone:state.setupDone,
+        cardBankLinks:state.cardBankLinks||{},
+        verifiedMonths:state.verifiedMonths||{},
         updatedAt: Date.now()
       });
       await setDoc(doc(db,'users',uid,'data','transactions'), {
-        transactions, uploadedFiles, customCategories, merchantOverrides,
+        transactions, uploadedFiles, customCategories, merchantOverrides, notesArchive,
         updatedAt: Date.now()
       });
       setSyncStatus('synced');
@@ -2302,17 +2614,14 @@ const _origSaveState = typeof saveState === 'function' ? saveState : function(){
 
 async function loadFromCloud(uid){
   return new Promise(resolve=>{
-    // safety timeout - never hang forever
     let done = false;
     const finish = (val)=>{ if(!done){ done=true; resolve(val); } };
-    setTimeout(()=>{ console.warn('Cloud load timeout - proceeding offline'); finish(false); }, 5000);
-    waitForFB(async ()=>{
-      const {db, doc, getDoc} = window._fb;
+    setTimeout(()=>{ finish(false); }, 6000);
+    if(!window._fb){ finish(false); return; }
+    const {db, doc, getDoc} = window._fb;
+    (async ()=>{
       try {
-        const [settingsSnap, txSnap] = await Promise.all([
-          getDoc(doc(db,'users',uid,'data','settings')),
-          getDoc(doc(db,'users',uid,'data','transactions'))
-        ]);
+        const settingsSnap = await getDoc(doc(db,'users',uid,'data','settings'));
         if(settingsSnap.exists()){
           const s = settingsSnap.data();
           state.selectedBanks = new Set(s.selectedBanks||[]);
@@ -2322,19 +2631,23 @@ async function loadFromCloud(uid){
           state.startDate = s.startDate||'2026-01';
           state.reminder = s.reminder||'biweekly';
           state.setupDone = s.setupDone||false;
+          state.cardBankLinks = s.cardBankLinks||{};
+          state.verifiedMonths = s.verifiedMonths||{};
           _origSaveState();
         }
+        const txSnap = await getDoc(doc(db,'users',uid,'data','transactions'));
         if(txSnap.exists()){
           const d = txSnap.data();
           transactions = d.transactions||[];
           uploadedFiles = d.uploadedFiles||[];
           customCategories = d.customCategories||{};
           merchantOverrides = d.merchantOverrides||{};
+          notesArchive = d.notesArchive||[];
           _origSaveTx();
         }
         finish(settingsSnap.exists());
       } catch(e) { console.error('Cloud load error:', e); finish(false); }
-    });
+    })();
   });
 }
 
@@ -2348,31 +2661,45 @@ window.saveState = function(){
   if(currentUser) saveToCloud();
 };
 
-// Auth state listener
-waitForFB(()=>{
+// Helper: fully hide auth screen and show a target screen
+function exitAuthTo(screenFn){
+  const authScr = document.getElementById('screen-auth');
+  if(authScr){ authScr.classList.remove('active'); authScr.style.display='none'; }
+  try { screenFn(); }
+  catch(e){ console.error('nav error', e); try{ initOnboarding(); showScreen('screen-onboarding'); }catch(_){} }
+}
+
+// ── Password gate ──
+function checkPassword(){
+  const inp=document.getElementById('pw-input');
+  const err=document.getElementById('pw-error');
+  if(inp.value===APP_PASSWORD){
+    sessionStorage.setItem('pw_ok','1');
+    document.getElementById('screen-password').style.display='none';
+    startAuthFlow();
+  } else {
+    err.textContent='סיסמה שגויה';
+    inp.value='';
+    inp.focus();
+  }
+}
+
+// Auth state listener (started only after password)
+function startAuthFlow(){
+ waitForFB(()=>{
   const {auth, onAuthStateChanged} = window._fb;
   onAuthStateChanged(auth, async (user)=>{
     if(user){
       currentUser = user;
-      // show user bar
       document.getElementById('user-bar').style.display='block';
       document.getElementById('user-avatar').src = user.photoURL||'';
       document.getElementById('user-name').textContent = user.displayName||user.email;
-      // load data from cloud
       document.getElementById('screen-auth').innerHTML='<div class="auth-loading"><div class="auth-spinner"></div><span>טוען נתונים...</span></div>';
       document.getElementById('screen-auth').style.display='flex';
-      // Load cloud data (with timeout safety), then navigate
-      try { await loadFromCloud(user.uid); } catch(e){ console.error('load err',e); }
-      // navigate (with error guard so we never stay stuck on loading)
-      try {
-        document.getElementById('screen-auth').style.display='none';
-        if(state.setupDone){ showDashboard(); }
-        else { initOnboarding(); showScreen('screen-onboarding'); }
-      } catch(e) {
-        console.error('Navigation error:', e);
-        document.getElementById('screen-auth').style.display='none';
-        try{ initOnboarding(); showScreen('screen-onboarding'); }catch(e2){ console.error(e2); }
-      }
+      // Load cloud data (timeout-protected), then navigate no matter what
+      await loadFromCloud(user.uid).catch(()=>{});
+      if(state.setupDone){ exitAuthTo(showDashboard); }
+      else { exitAuthTo(()=>{ initOnboarding(); showScreen('screen-onboarding'); }); }
     } else {
       currentUser = null;
       document.getElementById('user-bar').style.display='none';
@@ -2393,7 +2720,14 @@ waitForFB(()=>{
         </div>`;
     }
   });
-});
+ });
+}
+
+// If password already entered this session, skip the gate
+if(sessionStorage.getItem('pw_ok')==='1'){
+  document.getElementById('screen-password').style.display='none';
+  startAuthFlow();
+}
 
 
 // ═══════════════════════════
@@ -2492,7 +2826,12 @@ ${Object.entries(monthlyTotals).sort().map(([m,v])=>`${m}: הוצאות ₪${Mat
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 600,
@@ -2540,7 +2879,6 @@ ${Object.entries(monthlyTotals).sort().map(([m,v])=>`${m}: הוצאות ₪${Mat
   </div>
   <div class="bottom-nav">
     <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
-    <div class="nav-item" onclick="showUpload()"><div class="nav-icon">📤</div><div class="nav-label">העלאה</div></div>
     <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
     <div class="nav-item active"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
     <div class="nav-item" onclick="showSettings()"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
