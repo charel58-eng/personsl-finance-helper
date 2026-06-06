@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "1.7";
+const APP_VERSION = "1.8";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 // ═══════════════════════════════════════════════
@@ -1461,7 +1461,7 @@ async function analyzeFile(pf, ext){
 async function callAnthropicProxy(body){
   const fb = window._fb;
   if(!fb || !fb.functions){ throw new Error('החיבור לשרת עדיין נטען — נסה שוב בעוד רגע'); }
-  const fn = fb.httpsCallable(fb.functions, 'anthropicProxy');
+  const fn = fb.httpsCallable(fb.functions, 'anthropicProxy', { timeout: 300000 });
   const result = await fn({ body });
   return result.data; // תשובת Anthropic המלאה
 }
