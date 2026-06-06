@@ -1532,7 +1532,7 @@ ${contentForAI}
 7. החזר JSON תקין בלבד`;
 
   const data = await callAnthropicProxy({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 4000,
     messages: [{ role: 'user', content: prompt }]
   });
@@ -2835,7 +2835,7 @@ ${Object.entries(monthlyTotals).sort().map(([m,v])=>`${m}: הוצאות ₪${Mat
 
   try {
     const data = await callAnthropicProxy({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 600,
       system: systemPrompt,
       messages: chatHistory.filter(m=>m.role!=='system').map(m=>({role:m.role, content:m.content}))
