@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.5";
+const APP_VERSION = "2.6";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -982,6 +982,12 @@ button{cursor:pointer;}
     <div class="report-card" id="rep-insights"></div>
   </div>
 
+  <!-- Internal transfers (net zero, excluded from totals) -->
+  <div class="db-section">
+    <div class="section-header"><div class="section-title" id="rep-transfers-head">🔄 העברות פנימיות</div></div>
+    <div class="report-card" id="rep-transfers"></div>
+  </div>
+
   <div class="bottom-nav">
     <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
     <div class="nav-item active"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
@@ -1052,6 +1058,13 @@ let incomeOverrides = {};
 let customIncomeCats = {};
 let catMetaOverrides = {};   // {catId:{name}} — display-name overrides for ANY category (base or custom)
 
+// ── Internal transfers (bank↔bank) ──
+// transferLinks: [{a:txId, b:txId, auto:bool}] — confirmed pairs of two legs of the same internal transfer
+let transferLinks = [];
+// transferUnlinked: ["sortedAId|sortedBId", ...] — pairs the user explicitly un-matched (auto-detect won't re-suggest)
+let transferUnlinked = [];
+const TRANSFER_DATE_WINDOW_DAYS = 5; // max days between the two legs to still count as one transfer
+
 let currentMonth = new Date();
 let alertsExpanded = false;
 
@@ -1089,7 +1102,7 @@ function loadState() {
     return true;
   }catch(e){return false;}
 }
-function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,customIncomeCats,catMetaOverrides,notesArchive}));}catch(e){}}
+function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,customIncomeCats,catMetaOverrides,notesArchive,transferLinks,transferUnlinked}));}catch(e){}}
 function loadTx(){
   try{
     const raw=localStorage.getItem(TRANSACTIONS_KEY);
@@ -1104,7 +1117,10 @@ function loadTx(){
     customIncomeCats=d.customIncomeCats||{};
     catMetaOverrides=d.catMetaOverrides||{};
     notesArchive=d.notesArchive||[];
+    transferLinks=d.transferLinks||[];
+    transferUnlinked=d.transferUnlinked||[];
     migrateIncomeCategories();
+    detectInternalTransfers();
   }catch(e){}
 }
 
@@ -1148,6 +1164,74 @@ function getMonthsBetween(fromYYYYMM, toYYYYMM) {
 function getCurrentYYYYMM(){
   const n=new Date();
   return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`;
+}
+
+// ═══════════════════════════
+//  INTERNAL TRANSFERS (bank ↔ bank)
+// ═══════════════════════════
+// A transfer between two of the user's own bank accounts shows up as TWO legs:
+// a negative leg in account A and a positive leg in account B. Matched pairs are
+// excluded from expense/income totals and shown separately (net zero) in reports.
+function transferPairKey(id1,id2){return [id1,id2].sort().join('|');}
+function dateDiffDays(d1,d2){
+  if(!d1||!d2)return null;
+  const a=new Date(d1+'T00:00:00'),b=new Date(d2+'T00:00:00');
+  if(isNaN(a)||isNaN(b))return null;
+  return Math.abs(Math.round((a-b)/86400000));
+}
+function sameAmount(x,y){return Math.round(Math.abs(x)*100)===Math.round(Math.abs(y)*100);}
+// Set of all tx ids that are part of a valid (both legs exist) internal-transfer pair
+function getTransferTxIds(){
+  const byId={}; transactions.forEach(t=>byId[t.id]=t);
+  const s=new Set();
+  transferLinks.forEach(l=>{ if(byId[l.a]&&byId[l.b]){s.add(l.a);s.add(l.b);} });
+  return s;
+}
+// Idempotent: keeps existing links, drops stale/rejected ones, adds new auto-matches
+function detectInternalTransfers(){
+  const byId={}; transactions.forEach(t=>byId[t.id]=t);
+  // prune links whose tx no longer exist
+  transferLinks = transferLinks.filter(l=> byId[l.a] && byId[l.b]);
+  const linked=new Set(); transferLinks.forEach(l=>{linked.add(l.a);linked.add(l.b);});
+  const rejected=new Set(transferUnlinked);
+  const bankKeys=new Set(getAllAccounts().filter(a=>a.type==='bank').map(a=>a.key));
+  const elig=t=> bankKeys.has(t.accountKey) && !t.isAdjustment && !linked.has(t.id);
+  const negs=transactions.filter(t=>t.amount<0 && elig(t)).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const poss=transactions.filter(t=>t.amount>0 && elig(t));
+  const usedPos=new Set();
+  negs.forEach(neg=>{
+    let best=null,bestDiff=Infinity;
+    poss.forEach(pos=>{
+      if(usedPos.has(pos.id))return;
+      if(pos.accountKey===neg.accountKey)return;          // must be a different account
+      if(!sameAmount(pos.amount,neg.amount))return;        // exact amount
+      if(rejected.has(transferPairKey(neg.id,pos.id)))return;
+      const diff=dateDiffDays(neg.date,pos.date);
+      if(diff===null||diff>TRANSFER_DATE_WINDOW_DAYS)return;
+      if(diff<bestDiff){bestDiff=diff;best=pos;}
+    });
+    if(best){
+      usedPos.add(best.id);
+      transferLinks.push({a:neg.id,b:best.id,auto:true});
+      linked.add(neg.id);linked.add(best.id);
+    }
+  });
+}
+// User un-matches a pair → both legs return to normal expense/income; remembered so auto won't re-suggest
+function unlinkTransfer(aId,bId){
+  const k=transferPairKey(aId,bId);
+  if(!transferUnlinked.includes(k))transferUnlinked.push(k);
+  transferLinks=transferLinks.filter(l=>!( (l.a===aId&&l.b===bId)||(l.a===bId&&l.b===aId) ));
+  saveTx();
+  if(document.getElementById('screen-reports')?.classList.contains('active'))renderReports();
+  if(document.getElementById('screen-dashboard')?.classList.contains('active'))renderDashboard();
+  showToast('🔗 הזיווג בוטל — הפעולות חזרו להוצאות/הכנסות');
+}
+function rescanTransfers(){
+  detectInternalTransfers();
+  saveTx();
+  renderReports();
+  showToast('🔄 סריקת ההעברות הפנימיות הושלמה');
 }
 
 // ═══════════════════════════
@@ -1355,9 +1439,10 @@ function renderDashboard(){
 
   // Calculate totals from transactions for this month
   const ym=`${currentMonth.getFullYear()}-${String(currentMonth.getMonth()+1).padStart(2,'0')}`;
+  const tIds=getTransferTxIds();
   const monthTx=transactions.filter(t=>t.date&&t.date.startsWith(ym));
-  const expenses=monthTx.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
-  const income=monthTx.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+  const expenses=monthTx.filter(t=>t.amount<0&&!tIds.has(t.id)).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const income=monthTx.filter(t=>t.amount>0&&!tIds.has(t.id)).reduce((s,t)=>s+t.amount,0);
   document.getElementById('db-total-expense').textContent=fmtAmount(expenses);
   document.getElementById('db-total-income').textContent=fmtAmount(income);
   document.getElementById('db-tx-count').textContent=monthTx.length+' פעולות';
@@ -1386,12 +1471,13 @@ function renderDashboard(){
     document.getElementById('db-recent-tx').innerHTML=recent.map(t=>{
       const acc=getAllAccounts().find(a=>a.key===t.accountKey);
       const isInc=(t.amount||0)>0;
-      const bg=isInc?'var(--green-dim)':'var(--red-dim)';
+      const isTr=tIds.has(t.id);
+      const bg=isTr?'var(--surface3)':(isInc?'var(--green-dim)':'var(--red-dim)');
       const meta=getCatMeta(t.category||(isInc?'inc_other':'other'));
       return `<div class="tx-row">
-        <div class="tx-icon-wrap" style="background:${bg}">${meta.icon||'💰'}</div>
-        <div><div class="tx-name">${t.desc}</div><div class="tx-meta">${t.date}${acc?' · '+acc.name:''}</div></div>
-        <div class="tx-amount ${isInc?'credit':'debit'}">${isInc?'+':'−'} ${fmtAmount(t.amount)}</div>
+        <div class="tx-icon-wrap" style="background:${bg}">${isTr?'🔄':(meta.icon||'💰')}</div>
+        <div><div class="tx-name">${t.desc}</div><div class="tx-meta">${t.date}${acc?' · '+acc.name:''}${isTr?' · <span style="color:var(--text3)">העברה פנימית</span>':''}</div></div>
+        <div class="tx-amount ${isTr?'':(isInc?'credit':'debit')}"${isTr?' style="color:var(--text3)"':''}>${isInc?'+':'−'} ${fmtAmount(t.amount)}</div>
       </div>`;
     }).join('');
   }
@@ -1993,6 +2079,7 @@ async function confirmUpload(fileId){
   }
 
   saveState();
+  detectInternalTransfers();
   saveTx();
   const found=discoverCategories();
 
@@ -2894,8 +2981,10 @@ function getReportTx(){
 
 function renderReports(){
   const tx=getReportTx();
-  const expense=tx.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
-  const income=tx.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+  const tIds=getTransferTxIds();
+  const visTx=tx.filter(t=>!tIds.has(t.id)); // visible (non-transfer) tx — used for all totals/breakdowns
+  const expense=visTx.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const income=visTx.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
   const balance=income-expense;
   document.getElementById('rep-expense').textContent=fmtAmount(expense);
   document.getElementById('rep-income').textContent=fmtAmount(income);
@@ -2914,14 +3003,14 @@ function renderReports(){
   const trendTitle=document.querySelector('#screen-reports .section-title');
   if(months.length>1){
     trend=months.map(ym=>{
-      const mtx=tx.filter(t=>(t.date||'').slice(0,7)===ym);
+      const mtx=visTx.filter(t=>(t.date||'').slice(0,7)===ym);
       return {label:MONTHS_HE[parseInt(ym.split('-')[1])-1], exp:mtx.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0), inc:mtx.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)};
     });
     if(trendTitle)trendTitle.innerHTML='📈 מגמה חודשית';
   } else {
     // single month or days → group by week
     const weeks={};
-    tx.forEach(t=>{
+    visTx.forEach(t=>{
       const day=parseInt((t.date||'').slice(8,10))||1;
       const wk=Math.ceil(day/7); // 1..5
       if(!weeks[wk])weeks[wk]={exp:0,inc:0};
@@ -2952,7 +3041,7 @@ function renderReports(){
 
   // Categories (clickable → drill-down)
   const catMap={};
-  tx.filter(sideFilter).forEach(t=>{
+  visTx.filter(sideFilter).forEach(t=>{
     const c=t.category||(isInc?'inc_other':'other');
     catMap[c]=(catMap[c]||0)+Math.abs(t.amount);
   });
@@ -2973,7 +3062,7 @@ function renderReports(){
 
   // Top sources / merchants (grouped by resolved supplier)
   const merchMap={};
-  tx.filter(sideFilter).forEach(t=>{
+  visTx.filter(sideFilter).forEach(t=>{
     const key=txSupplier(t);
     if(!merchMap[key])merchMap[key]={amt:0,count:0};
     merchMap[key].amt+=Math.abs(t.amount);merchMap[key].count++;
@@ -3031,6 +3120,58 @@ function renderReports(){
       <span class="insight-icon">${i.icon}</span>
       <span class="insight-text${i.warn?' warn':''}">${i.text}</span>
     </div>`).join('');
+
+  renderTransfersSection(tx);
+}
+
+// Render the "internal transfers" section at the bottom of reports (net zero, excluded from totals)
+function renderTransfersSection(rangeTx){
+  const host=document.getElementById('rep-transfers');
+  const headEl=document.getElementById('rep-transfers-head');
+  if(!host)return;
+  const range=getActiveRange();
+  const inRange=d=> d && d>=range.fromDate && d<=range.toDate;
+  const byId={}; transactions.forEach(t=>byId[t.id]=t);
+  // Build pair list (at least one leg within the active range), oriented source(neg) → dest(pos)
+  const pairs=[];
+  transferLinks.forEach(l=>{
+    const A=byId[l.a], B=byId[l.b];
+    if(!A||!B)return;
+    if(!inRange(A.date)&&!inRange(B.date))return;
+    const src = A.amount<0 ? A : B;   // money out
+    const dst = A.amount<0 ? B : A;   // money in
+    pairs.push({src,dst});
+  });
+  pairs.sort((a,b)=>(b.src.date||'').localeCompare(a.src.date||''));
+  const total=pairs.reduce((s,p)=>s+Math.abs(p.src.amount),0);
+  if(headEl) headEl.innerHTML = pairs.length
+    ? `🔄 העברות פנימיות <span style="color:var(--text3);font-weight:500;font-size:12px;">(${pairs.length} · לא נכללות בסיכום)</span>`
+    : `🔄 העברות פנימיות`;
+  if(!pairs.length){
+    host.innerHTML=`<div class="empty-state" style="padding:14px;">לא זוהו העברות בין החשבונות שלך בתקופה זו<br><button class="reassign-new" style="margin-top:10px;display:inline-block;width:auto;padding:8px 16px;" onclick="rescanTransfers()">🔄 סרוק מחדש</button></div>`;
+    return;
+  }
+  const acN=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?a.name:'חשבון';};
+  let rows=pairs.map(p=>{
+    const dateLabel = p.src.date===p.dst.date ? p.src.date : `${p.src.date} → ${p.dst.date}`;
+    return `<div class="tx-row" style="align-items:center;">
+      <div class="tx-icon-wrap" style="background:var(--surface3)">🔄</div>
+      <div style="min-width:0;flex:1;">
+        <div class="tx-name">${acN(p.src.accountKey)} ← ${acN(p.dst.accountKey)}</div>
+        <div class="tx-meta">${dateLabel}${p.src.desc?' · '+p.src.desc:''}</div>
+      </div>
+      <div style="text-align:left;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+        <div class="tx-amount" style="color:var(--text2)">${fmtAmount(p.src.amount)}</div>
+        <button onclick="unlinkTransfer('${p.src.id}','${p.dst.id}')" style="background:none;border:1px solid var(--border2);color:var(--text3);font-family:'Heebo';font-size:11px;padding:2px 8px;border-radius:6px;cursor:pointer;">בטל זיווג</button>
+      </div>
+    </div>`;
+  }).join('');
+  rows+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 4px 2px;border-top:1px solid var(--border);margin-top:6px;">
+      <span style="font-size:12px;color:var(--text2);">סך מועבר: ${fmtAmount(total)}</span>
+      <span style="font-size:13px;font-weight:700;color:var(--text2);">השפעה נטו: ₪0</span>
+    </div>
+    <div style="text-align:center;margin-top:8px;"><button class="reassign-new" style="display:inline-block;width:auto;padding:6px 14px;font-size:12px;" onclick="rescanTransfers()">🔄 סרוק מחדש</button></div>`;
+  host.innerHTML=rows;
 }
 
 // ── Category drill-down ──
@@ -3040,10 +3181,11 @@ function openCatModal(catKey){
   const isInc = isIncomeCat(catKey) || reportView==='income';
   const meta=getCatMeta(catKey);
   const sideFilter = isInc ? (t=>t.amount>0) : (t=>t.amount<0);
-  const tx=getReportTx().filter(t=>sideFilter(t)&&(t.category||(isInc?'inc_other':'other'))===catKey)
+  const tIds=getTransferTxIds();
+  const tx=getReportTx().filter(t=>sideFilter(t)&&!tIds.has(t.id)&&(t.category||(isInc?'inc_other':'other'))===catKey)
     .sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount));
   const total=tx.reduce((s,t)=>s+Math.abs(t.amount),0);
-  const allSide=getReportTx().filter(sideFilter).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const allSide=getReportTx().filter(t=>sideFilter(t)&&!tIds.has(t.id)).reduce((s,t)=>s+Math.abs(t.amount),0);
   const pctOfAll=allSide>0?Math.round(total/allSide*100):0;
   const ofLabel=isInc?'מההכנסות':'מההוצאות';
 
@@ -3341,7 +3483,7 @@ async function saveToCloud(){
         updatedAt: Date.now()
       });
       await setDoc(doc(db,'users',uid,'data','transactions'), {
-        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, catMetaOverrides, notesArchive,
+        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, catMetaOverrides, notesArchive, transferLinks, transferUnlinked,
         updatedAt: Date.now()
       });
       setSyncStatus('synced');
@@ -3388,7 +3530,10 @@ async function loadFromCloud(uid){
           customIncomeCats = d.customIncomeCats||{};
           catMetaOverrides = d.catMetaOverrides||{};
           notesArchive = d.notesArchive||[];
+          transferLinks = d.transferLinks||[];
+          transferUnlinked = d.transferUnlinked||[];
           migrateIncomeCategories();
+          detectInternalTransfers();
           _origSaveTx();
         }
         finish(settingsSnap.exists());
