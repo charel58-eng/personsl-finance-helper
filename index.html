@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.4";
+const APP_VERSION = "2.5";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -394,6 +394,10 @@ button{cursor:pointer;}
 .cat-mgr-tag{font-size:9px;font-weight:800;color:var(--text3);background:var(--surface3);border-radius:5px;padding:2px 6px;flex-shrink:0;}
 .cat-mgr-edit{font-size:12px;color:var(--blue);font-weight:700;cursor:pointer;flex-shrink:0;}
 .cat-mgr-sublabel{font-size:11px;color:var(--text3);font-weight:700;margin:10px 2px 6px;}
+/* auto vs manual classification badge in the tx editor */
+.match-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;border-radius:7px;padding:3px 9px;margin-top:6px;}
+.match-badge.auto{background:var(--blue-dim);color:var(--blue);border:1px solid var(--blue-glow);}
+.match-badge.manual{background:var(--green-dim);color:var(--green);border:1px solid var(--green-glow);}
 
 /* ── REPORTS ── */
 #screen-reports{padding-bottom:calc(80px + env(safe-area-inset-bottom));}
@@ -2248,7 +2252,7 @@ function discoverCategories(){
 function reassignMerchant(mn, catId){
   merchantOverrides[mn]=catId;
   transactions.forEach(t=>{
-    if((t.amount||0)<0 && merchantName(t.desc)===mn)t.category=catId;
+    if((t.amount||0)<0 && merchantName(t.desc)===mn){t.category=catId; t.catManual=true;}
   });
   saveTx();
 }
@@ -2257,7 +2261,7 @@ function reassignMerchant(mn, catId){
 function reassignIncomeSource(mn, catId){
   incomeOverrides[mn]=catId;
   transactions.forEach(t=>{
-    if((t.amount||0)>0 && merchantName(t.desc)===mn)t.category=catId;
+    if((t.amount||0)>0 && merchantName(t.desc)===mn){t.category=catId; t.catManual=true;}
   });
   saveTx();
 }
@@ -2289,6 +2293,7 @@ function countSameSupplier(t){
 
 let recAccountKey=null;
 let txEditId=null;          // transaction currently being edited
+let txCatEditOpen=false;    // whether the category list is expanded in the tx editor
 let pendingEdit=null;       // {type:'category'|'supplier', value}
 
 function showReconcile(key){
@@ -2332,19 +2337,42 @@ function renderReconcile(){
 }
 
 // ── edit modal ──
+// Entry point: opens the modal fresh (category list collapsed by default, like the supplier row).
 function openTxEdit(id){
   txEditId=id;
-  const t=transactions.find(x=>x.id===id);
+  txCatEditOpen=false;
+  if(!transactions.find(x=>x.id===id))return;
+  renderTxEditBody();
+  document.getElementById('txedit-modal').classList.add('open');
+}
+// Toggle the category list open/closed without resetting the editor
+function toggleTxCatEdit(){ txCatEditOpen=!txCatEditOpen; renderTxEditBody(); }
+// Builds the editor body using the current txEditId + txCatEditOpen state
+function renderTxEditBody(){
+  const t=transactions.find(x=>x.id===txEditId);
   if(!t)return;
   const isInc=(t.amount||0)>0;
   const cat=getCatMeta(t.category);
   const sup=txSupplier(t);
-  const optList=isInc?Object.entries(incomeCatMeta()):Object.entries(allCatMeta()).filter(([cid])=>!['salary','transfer'].includes(cid)&&!cid.startsWith('inc_'));
-  const grid=optList.map(([cid,m])=>`<div class="reassign-opt ${cid===t.category?'current':''}" onclick="chooseTxCategory('${cid}')">
-      <span style="font-size:18px;">${m.icon}</span><span>${m.name}</span>
-      <span class="cat-edit-pencil" onclick="editCatFromChip(event,'${cid}',${isInc})" title="שנה שם">✏️</span></div>`).join('');
+  const kindLabel=isInc?'סוג הכנסה':'סוג הוצאה';
+  // auto vs manual classification badge
+  const badge=t.catManual
+    ? `<span class="match-badge manual">✋ התאמה ידנית</span>`
+    : `<span class="match-badge auto">⚡ התאמה אוטומטית</span>`;
   const expBtn=`<button onclick="flipTxKind(false)" style="flex:1;padding:11px;border-radius:11px;border:2px solid ${!isInc?'var(--red)':'var(--border)'};background:${!isInc?'var(--red-dim)':'var(--surface2)'};color:${!isInc?'var(--red)':'var(--text2)'};font-weight:800;font-size:14px;">📉 הוצאה</button>`;
   const incBtn=`<button onclick="flipTxKind(true)" style="flex:1;padding:11px;border-radius:11px;border:2px solid ${isInc?'var(--green)':'var(--border)'};background:${isInc?'var(--green-dim)':'var(--surface2)'};color:${isInc?'var(--green)':'var(--text2)'};font-weight:800;font-size:14px;">📈 הכנסה</button>`;
+  // category list (only built/shown when expanded)
+  let catSection='';
+  if(txCatEditOpen){
+    const optList=isInc?Object.entries(incomeCatMeta()):Object.entries(allCatMeta()).filter(([cid])=>!['salary','transfer'].includes(cid)&&!cid.startsWith('inc_'));
+    const grid=optList.map(([cid,m])=>`<div class="reassign-opt ${cid===t.category?'current':''}" onclick="chooseTxCategory('${cid}')">
+        <span style="font-size:18px;">${m.icon}</span><span>${m.name}</span>
+        <span class="cat-edit-pencil" onclick="editCatFromChip(event,'${cid}',${isInc})" title="שנה שם">✏️</span></div>`).join('');
+    catSection=`
+      <div style="font-size:12px;color:var(--text3);margin:10px 2px 6px;">בחר ${kindLabel}:</div>
+      <div class="reassign-grid">${grid}</div>
+      <button class="reassign-new" onclick="promptNewCatForTx(${isInc})">➕ ${isInc?'סוג הכנסה חדש':'קטגוריה חדשה'}</button>`;
+  }
   document.getElementById('txedit-body').innerHTML=`
     <div class="cat-modal-header">
       <div class="cat-modal-icon">${cat.icon}</div>
@@ -2356,11 +2384,12 @@ function openTxEdit(id){
       <div><div class="lbl">סוג ספק</div><div class="val">🏷️ ${sup}</div></div>
       <button class="rec-edit-btn" onclick="promptSupplier()">שנה ספק</button>
     </div>
-    <div style="font-size:12px;color:var(--text3);margin:10px 2px 6px;">${isInc?'סוג הכנסה:':'סוג הוצאה (קטגוריה):'}</div>
-    <div class="reassign-grid">${grid}</div>
-    <button class="reassign-new" onclick="promptNewCatForTx(${isInc})">➕ ${isInc?'סוג הכנסה חדש':'קטגוריה חדשה'}</button>
-    <button class="modal-cancel" style="width:100%;margin-top:8px;" onclick="closeTxEdit()">סגור</button>`;
-  document.getElementById('txedit-modal').classList.add('open');
+    <div class="rec-edit-row">
+      <div><div class="lbl">${kindLabel}</div><div class="val">${cat.icon} ${cat.name}</div>${badge}</div>
+      <button class="rec-edit-btn" onclick="toggleTxCatEdit()">${txCatEditOpen?'הסתר':'שנה'}</button>
+    </div>
+    ${catSection}
+    <button class="modal-cancel" style="width:100%;margin-top:10px;" onclick="closeTxEdit()">סגור</button>`;
 }
 function closeTxEdit(){document.getElementById('txedit-modal').classList.remove('open');}
 
@@ -2376,7 +2405,7 @@ function flipTxKind(toIncome){
   saveTx();
   if(document.getElementById('screen-reconcile')?.classList.contains('active'))renderReconcile();
   if(document.getElementById('screen-reports')?.classList.contains('active'))renderReports();
-  openTxEdit(txEditId);
+  renderTxEditBody();
 }
 
 function chooseTxCategory(catId){
@@ -2533,7 +2562,7 @@ function saveCatRename(){
   // refresh any open surface so the new name shows immediately
   if(document.getElementById('cat-modal')?.classList.contains('open') && catModalKey) openCatModal(catModalKey);
   if(reassignCtx && document.getElementById('reassign-modal')?.classList.contains('open')) openReassign(reassignCtx.encName,reassignCtx.currentCat,reassignCtx.isInc);
-  if(document.getElementById('txedit-modal')?.classList.contains('open') && txEditId) openTxEdit(txEditId);
+  if(document.getElementById('txedit-modal')?.classList.contains('open') && txEditId) renderTxEditBody();
   if(document.getElementById('screen-reports')?.classList.contains('active')) renderReports();
   if(document.getElementById('screen-reconcile')?.classList.contains('active')) renderReconcile();
   if(document.getElementById('screen-settings')?.classList.contains('active')) renderSettings();
@@ -2636,8 +2665,8 @@ function applyEdit(scope){
       // all transactions of this supplier (past) + remember for future uploads
       transactions.forEach(x=>{
         if(txSupplier(x)===canon){
-          if(inc){ if((x.amount||0)>0){ x.category=catId; incomeOverrides[merchantName(x.desc)]=catId; } }
-          else { if((x.amount||0)<0){ x.category=catId; merchantOverrides[merchantName(x.desc)]=catId; } }
+          if(inc){ if((x.amount||0)>0){ x.category=catId; x.catManual=true; incomeOverrides[merchantName(x.desc)]=catId; } }
+          else { if((x.amount||0)<0){ x.category=catId; x.catManual=true; merchantOverrides[merchantName(x.desc)]=catId; } }
         }
       });
     }
