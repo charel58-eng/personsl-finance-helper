@@ -48,9 +48,15 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "1.9";
+const APP_VERSION = "2.1";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
+
+// ── מגבלות סבירות לקובץ (בדיקה לפני שליחה ל-AI) ──
+// המטרה: לא לחתוך נתונים בשקט. קובץ ארוך מדי נחסם עם הודעה למשתמש לפצל אותו.
+const MAX_PDF_PAGES     = 10;     // PDF ארוך מ-10 עמודים → לפצל
+const MAX_TABULAR_ROWS  = 400;    // מקביל ל-~10 עמודים בקובץ טבלאי (Excel/CSV)
+const MAX_CONTENT_CHARS = 30000;  // תקרת תווים אחרי חילוץ — מעבר לזה לא נשלח ל-AI
 // ═══════════════════════════════════════════════
 </script>
 <style>
@@ -184,6 +190,37 @@ button{cursor:pointer;}
 .status-pill.red{background:var(--red-dim);color:var(--red);border:1px solid var(--red-glow);}
 .btn-upload{padding:7px 12px;background:var(--blue-dim);border:1px solid var(--blue-glow);border-radius:10px;font-size:12px;font-weight:700;color:var(--blue);cursor:pointer;white-space:nowrap;}
 .btn-upload:active{opacity:0.7;}
+.btn-reconcile{padding:7px 12px;background:var(--green-dim);border:1px solid var(--green);border-radius:10px;font-size:12px;font-weight:700;color:var(--green);cursor:pointer;white-space:nowrap;}
+.btn-reconcile:active{opacity:0.7;}
+
+/* reconcile view */
+#screen-reconcile{padding-bottom:calc(80px + env(safe-area-inset-bottom));}
+.rec-head{display:flex;align-items:center;gap:10px;padding:14px 16px 6px;}
+.rec-back{background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text2);font-size:13px;font-weight:700;padding:7px 12px;cursor:pointer;}
+.rec-title{font-size:18px;font-weight:800;}
+.rec-sub{font-size:12px;color:var(--text3);margin-top:2px;}
+.rec-toolbar{display:flex;gap:8px;padding:8px 16px;flex-wrap:wrap;}
+.rec-chip{flex:1;min-width:90px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:8px 10px;text-align:center;}
+.rec-chip .n{font-size:16px;font-weight:800;}
+.rec-chip .l{font-size:10px;color:var(--text3);}
+.rec-tx-list{padding:4px 12px;}
+.rec-tx{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:7px;cursor:pointer;}
+.rec-tx:active{opacity:.7;}
+.rec-tx-ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;}
+.rec-tx-mid{flex:1;min-width:0;}
+.rec-tx-desc{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rec-tx-meta{font-size:11px;color:var(--text3);margin-top:2px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.rec-tag{background:var(--surface3);border-radius:6px;padding:1px 6px;font-size:10px;color:var(--text2);}
+.rec-tag.sup{background:var(--blue-dim);color:var(--blue);}
+.rec-tx-amt{font-weight:800;font-size:14px;white-space:nowrap;}
+.rec-edit-row{display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border-radius:12px;padding:12px 14px;margin-bottom:8px;}
+.rec-edit-row .lbl{font-size:12px;color:var(--text3);}
+.rec-edit-row .val{font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px;}
+.rec-edit-btn{background:var(--blue-dim);border:1px solid var(--blue-glow);color:var(--blue);border-radius:9px;font-size:12px;font-weight:700;padding:6px 12px;cursor:pointer;}
+.rec-scope-btn{width:100%;text-align:right;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:8px;cursor:pointer;color:var(--text);font-size:14px;}
+.rec-scope-btn:active{opacity:.7;}
+.rec-scope-btn strong{display:block;font-size:15px;margin-bottom:2px;}
+.rec-scope-btn small{color:var(--text3);font-size:12px;}
 
 /* Completeness bar */
 .completeness-bar{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
@@ -367,14 +404,6 @@ button{cursor:pointer;}
 .reassign-opt:active{transform:scale(.97);}
 .reassign-opt.current{border-color:var(--green);background:var(--green-dim);}
 .reassign-new{width:100%;margin-top:10px;padding:12px;background:var(--blue-dim);border:1.5px solid var(--blue-glow);border-radius:12px;color:var(--blue);font-size:14px;font-weight:700;}
-.tt-type-toggle{display:flex;gap:8px;margin:14px 0;}
-.tt-type-btn{flex:1;padding:13px;border-radius:12px;border:2px solid var(--border);background:var(--surface2);font-size:15px;font-weight:800;color:var(--text2);transition:all .15s;}
-.tt-type-btn.active.expense{background:var(--red-dim);border-color:var(--red);color:var(--red);}
-.tt-type-btn.active.income{background:var(--green-dim);border-color:var(--green);color:var(--green);}
-.tt-tx-head{text-align:center;margin-bottom:6px;}
-.tt-tx-desc{font-size:15px;font-weight:700;}
-.tt-tx-amt{font-size:20px;font-weight:800;margin-top:4px;}
-.tt-section-label{font-size:12px;font-weight:700;color:var(--text2);margin:6px 0 8px;}
 
 .report-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:8px;}
 .bar-chart{display:flex;align-items:flex-end;justify-content:space-around;gap:8px;height:150px;padding-top:10px;}
@@ -533,10 +562,33 @@ button{cursor:pointer;}
   </div>
 </div>
 
-<!-- Transaction type / category editor modal -->
-<div class="modal-overlay" id="txtype-modal" onclick="if(event.target===this)closeTxType()">
+<!-- Transaction edit modal (category + supplier) -->
+<div class="modal-overlay" id="txedit-modal" onclick="if(event.target===this)closeTxEdit()">
   <div class="modal-box">
-    <div id="txtype-body"></div>
+    <div id="txedit-body"></div>
+  </div>
+</div>
+
+<!-- Scope choice modal (this one vs all of supplier) -->
+<div class="modal-overlay" id="txscope-modal" onclick="if(event.target===this)closeTxScope()">
+  <div class="modal-box">
+    <div id="txscope-body"></div>
+  </div>
+</div>
+
+<!-- ═══ RECONCILE SCREEN ═══ -->
+<div class="screen" id="screen-reconcile">
+  <div class="rec-head">
+    <button class="rec-back" onclick="showDashboard()">→ חזרה</button>
+    <div><div class="rec-title" id="rec-title">בדיקת התאמות</div><div class="rec-sub" id="rec-sub"></div></div>
+  </div>
+  <div class="rec-toolbar" id="rec-toolbar"></div>
+  <div class="rec-tx-list" id="rec-tx-list"></div>
+  <div class="bottom-nav">
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
+    <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
+    <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
+    <div class="nav-item" onclick="showSettings()"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
   </div>
 </div>
 
@@ -697,7 +749,7 @@ button{cursor:pointer;}
   </div>
 
   <div class="bottom-nav">
-    <div class="nav-item active" id="nav-home" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
+    <div class="nav-item active" id="nav-home" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
     <div class="nav-item" id="nav-reports" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
     <div class="nav-item" id="nav-chat" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
     <div class="nav-item" id="nav-settings" onclick="showSettings()"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
@@ -785,7 +837,7 @@ button{cursor:pointer;}
   <div style="text-align:center;padding:16px;font-size:11px;color:var(--text3);" id="settings-version">גרסה —</div>
 
   <div class="bottom-nav">
-    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
     <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
     <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
     <div class="nav-item active"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
@@ -873,7 +925,7 @@ button{cursor:pointer;}
   </div>
 
   <div class="bottom-nav">
-    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
     <div class="nav-item active"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
     <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
     <div class="nav-item" onclick="showSettings()"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
@@ -932,9 +984,11 @@ let uploadedFiles = [];
 let pendingFiles = [];
 // customCategories: {catId: {name, icon, color, keywords:[]}}  — user/auto created
 let customCategories = {};
-// merchantOverrides: {merchantName: catId}  — manual reassignment of an EXPENSE supplier
+// merchantOverrides: {merchantName: catId}  — manual reassignment of a supplier
 let merchantOverrides = {};
-// incomeOverrides: {merchantName: incCatId}  — manual reassignment of an INCOME source
+// supplierOverrides: {rawMerchantName: canonicalSupplierName} — rename/merge of a supplier (סוג ספק)
+let supplierOverrides = {};
+// incomeOverrides: {merchantName: incCatId} — manual reassignment of an INCOME source
 let incomeOverrides = {};
 
 let currentMonth = new Date();
@@ -974,7 +1028,7 @@ function loadState() {
     return true;
   }catch(e){return false;}
 }
-function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,incomeOverrides,notesArchive}));}catch(e){}}
+function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,notesArchive}));}catch(e){}}
 function loadTx(){
   try{
     const raw=localStorage.getItem(TRANSACTIONS_KEY);
@@ -984,6 +1038,7 @@ function loadTx(){
     uploadedFiles=d.uploadedFiles||[];
     customCategories=d.customCategories||{};
     merchantOverrides=d.merchantOverrides||{};
+    supplierOverrides=d.supplierOverrides||{};
     incomeOverrides=d.incomeOverrides||{};
     notesArchive=d.notesArchive||[];
     migrateIncomeCategories();
@@ -1270,7 +1325,7 @@ function renderDashboard(){
       const isInc=(t.amount||0)>0;
       const bg=isInc?'var(--green-dim)':'var(--red-dim)';
       const meta=getCatMeta(t.category||(isInc?'inc_other':'other'));
-      return `<div class="tx-row" style="cursor:pointer;" onclick="openTxType({mode:'saved',txId:'${t.id}'})">
+      return `<div class="tx-row">
         <div class="tx-icon-wrap" style="background:${bg}">${meta.icon||'💰'}</div>
         <div><div class="tx-name">${t.desc}</div><div class="tx-meta">${t.date}${acc?' · '+acc.name:''}</div></div>
         <div class="tx-amount ${isInc?'credit':'debit'}">${isInc?'+':'−'} ${fmtAmount(t.amount)}</div>
@@ -1306,6 +1361,7 @@ function renderAccountSection(containerId, type){
         <div class="acc-right">
           <span class="status-pill ${statusClass}">${statusText}</span>
           <button class="btn-upload" onclick="showUploadForAccount('${acc.key}')">📤 העלה</button>
+          <button class="btn-reconcile" onclick="showReconcile('${acc.key}')">🔎 בדיקת התאמות</button>
         </div>
       </div>
       <div class="completeness-bar">
@@ -1412,13 +1468,38 @@ async function readPdfText(file){
   lib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   const buf=await file.arrayBuffer();
   const pdf=await lib.getDocument({data:buf}).promise;
+  const pages=pdf.numPages;
+  // בדיקה לפני חילוץ: אם יש יותר מדי עמודים — מחזירים מיד בלי לבזבז עבודה
+  if(pages>MAX_PDF_PAGES){ return { text:'', pages, tooLong:true }; }
   let text='';
-  for(let p=1;p<=pdf.numPages;p++){
+  for(let p=1;p<=pages;p++){
     const page=await pdf.getPage(p);
     const content=await page.getTextContent();
     text+=content.items.map(i=>i.str).join(' ')+'\n';
   }
-  return text;
+  return { text, pages, tooLong:false };
+}
+
+// בדיקת סבירות לקבצים טבלאיים + תקרת תווים כללית (לפני שליחה ל-AI)
+function checkFileReasonable(ext, content){
+  if(ext==='csv'||ext==='xlsx'||ext==='xls'){
+    const rows=content.split('\n').filter(l=>l.trim().length>0).length;
+    if(rows>MAX_TABULAR_ROWS) return `הקובץ מכיל ${rows} שורות (המקסימום ${MAX_TABULAR_ROWS})`;
+  }
+  if(content.length>MAX_CONTENT_CHARS){
+    return `הקובץ ארוך מדי (~${Math.round(content.length/1000)}K תווים, המקסימום ${MAX_CONTENT_CHARS/1000}K)`;
+  }
+  return null; // תקין
+}
+
+// הודעת "קובץ ארוך מדי" — לא נשלח ל-AI, מבקש מהמשתמש לפצל
+function showFileTooLong(assignDiv, pf, detail){
+  assignDiv.innerHTML=`<div class="assign-ambiguous">
+      📄 <strong>הקובץ ארוך מדי לניתוח</strong><br>
+      נא לפצל את הקובץ או לשלוח קובץ לתקופה קצרה יותר.
+      ${detail?`<br><small style="opacity:.8">${detail}</small>`:''}
+    </div>
+    <button class="btn-confirm-upload" style="background:var(--surface2);color:var(--text2)" onclick="removePendingFile('${pf.fileId}')">הסר קובץ</button>`;
 }
 
 async function analyzeFile(pf, ext){
@@ -1435,7 +1516,9 @@ async function analyzeFile(pf, ext){
       const wb=XLSX.read(buf,{type:'array'});
       fileContent=wb.SheetNames.map(name=>XLSX.utils.sheet_to_csv(wb.Sheets[name])).join('\n');
     } else if(ext==='pdf'){
-      fileContent=await readPdfText(pf.file);
+      const r=await readPdfText(pf.file);
+      if(r.tooLong){ showFileTooLong(assignDiv, pf, `הקובץ מכיל ${r.pages} עמודים (המקסימום ${MAX_PDF_PAGES})`); return; }
+      fileContent=r.text;
     }
   }catch(e){
     assignDiv.innerHTML='<div class="assign-ambiguous">⚠️ שגיאה בקריאת הקובץ: '+e.message+'</div>';
@@ -1446,6 +1529,10 @@ async function analyzeFile(pf, ext){
     renderAssignUI(pf, fallbackResult(getAllAccounts(),'לא הצלחתי לקרוא תוכן מהקובץ'), getAllAccounts(), assignDiv);
     return;
   }
+
+  // ── שער סבירות: בודק לפני שליחה ל-AI שהקובץ לא ארוך מדי ──
+  const tooLongReason=checkFileReasonable(ext, fileContent);
+  if(tooLongReason){ showFileTooLong(assignDiv, pf, tooLongReason); return; }
 
   assignDiv.innerHTML=`<div style="padding:12px;background:var(--surface2);border-radius:10px;margin-top:8px;">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
@@ -1479,6 +1566,7 @@ async function analyzeFile(pf, ext){
     }
     renderAssignUI(pf, result, getAllAccounts(), assignDiv);
   } catch(e) {
+    if(e.code==='TOO_LONG'){ showFileTooLong(assignDiv, pf, 'התברר שהקובץ מכיל יותר מדי תנועות לניתוח בבת אחת'); return; }
     console.error('AI analysis failed:', e);
     assignDiv.innerHTML=`<div class="assign-ambiguous">⚠️ שגיאת AI: ${e.message}<br><small>נסה שוב או בחר חשבון ידנית</small></div>
       <div class="assign-options">${getAllAccounts().map(a=>`<div class="assign-opt" data-key="${a.key}" onclick="assignFile('${pf.fileId}','${a.key}',this)">${a.icon} ${a.name}</div>`).join('')}</div>
@@ -1568,6 +1656,10 @@ ${contentForAI}
     max_tokens: 8000,
     messages: [{ role: 'user', content: prompt }]
   });
+  // post-flight: אם המודל נחתך כי הגיע לתקרת הפלט — ה-JSON חלקי, התנועות נקטעו → "ארוך מדי"
+  if(data.stop_reason==='max_tokens'){
+    const err=new Error('הקובץ ארוך מדי'); err.code='TOO_LONG'; throw err;
+  }
   const raw = data.content?.find(c => c.type === 'text')?.text || '';
 
   // Parse JSON — strip markdown fences, then extract the JSON object
@@ -1637,7 +1729,7 @@ function renderAssignUI(pf, result, allAccounts, assignDiv){
     assignDiv.innerHTML=`
       <div class="assign-label">✅ זוהה אוטומטית: <strong style="color:var(--green)">${acc?acc.name:'חשבון לא ידוע'}</strong></div>
       <div class="assign-options">${allAccounts.map(a=>`<div class="assign-opt ${a.key===result.detectedAccount?'selected-'+a.type:''}" data-key="${a.key}" onclick="assignFile('${pf.fileId}','${a.key}',this)">${a.icon} ${a.name}</div>`).join('')}</div>
-      ${renderAISummary(result, pf.fileId)}
+      ${renderAISummary(result)}
       <button class="btn-confirm-upload" onclick="confirmUpload('${pf.fileId}')">✅ אשר ושמור</button>`;
   } else {
     // Ambiguous or unknown — show all options
@@ -1646,37 +1738,26 @@ function renderAssignUI(pf, result, allAccounts, assignDiv){
       <div class="assign-ambiguous">⚠️ ${reason}</div>
       <div class="assign-label" style="margin-top:8px">בחר חשבון ידנית:</div>
       <div class="assign-options">${allAccounts.map(a=>`<div class="assign-opt" data-key="${a.key}" onclick="assignFile('${pf.fileId}','${a.key}',this)">${a.icon} ${a.name}</div>`).join('')}</div>
-      ${renderAISummary(result, pf.fileId)}
+      ${renderAISummary(result)}
       <div style="display:flex;gap:8px;margin-top:10px;">
         <button class="btn-confirm-upload" id="confirm_${pf.fileId}" onclick="confirmUpload('${pf.fileId}')" disabled style="flex:1">✅ אשר ושמור</button>
       </div>`;
   }
 }
 
-function buildPreviewTxRows(result, fileId){
-  const arr=(result.allTransactions&&result.allTransactions.length)?result.allTransactions:(result.sampleTransactions||[]);
-  if(!arr.length)return '';
-  return arr.map((t,i)=>{
-    const amt=t.amount||0;
-    const isInc=amt>0;
-    const meta=getCatMeta(t.forcedCat||(isInc?(t.incomeType||categorizeIncome((t.desc||'').toLowerCase())):categorize(t.desc||'',amt)));
-    return `<div class="ar-tx" style="cursor:pointer;align-items:center;" onclick="openTxType({mode:'preview',fileId:'${fileId}',index:${i}})">
-      <span style="font-size:15px;width:22px;text-align:center;" title="${meta.name}">${meta.icon}</span>
-      <span class="ar-tx-desc">${t.desc||'—'}</span>
-      <span class="ar-tx-date">${t.date||''}</span>
-      <span class="ar-tx-amt ${isInc?'credit':'debit'}">${isInc?'+':'−'} ${fmtAmount(amt)}</span>
-      <span style="font-size:11px;color:var(--text3);margin-right:4px;">✎</span>
-    </div>`;
-  }).join('');
-}
-
-function renderAISummary(result, fileId){
+function renderAISummary(result){
   if(!result.summary&&!result.sampleTransactions?.length&&!result.allTransactions?.length)return '';
   const s=result.summary||{};
+  const displayTx=(result.allTransactions||result.sampleTransactions||[]).slice(0,6);
   const totalTx=result.summary?.txCount||(result.allTransactions||[]).length;
+  const txRows=displayTx.map(t=>`
+    <div class="ar-tx">
+      <span class="ar-tx-desc">${t.desc||'—'}</span>
+      <span class="ar-tx-date">${t.date||''}</span>
+      <span class="ar-tx-amt ${(t.amount||0)<0?'debit':'credit'}">${(t.amount||0)<0?'−':'+'} ${fmtAmount(t.amount||0)}</span>
+    </div>`).join('');
   const insightRows=(result.insights||[]).map(i=>`<div style="font-size:11px;color:var(--text2);padding:4px 0;border-bottom:1px solid var(--border);">💡 ${i}</div>`).join('');
   const hasBalances=s.openingBalance||s.closingBalance;
-  const txRows=buildPreviewTxRows(result, fileId);
   return `
     <div style="margin-top:10px;padding:12px;background:var(--surface2);border-radius:10px;">
       <div style="font-size:11px;font-weight:700;color:var(--purple);margin-bottom:10px;">🧠 ניתוח AI · ${result._aiParsed?'חי':'מקומי'}</div>
@@ -1696,8 +1777,7 @@ function renderAISummary(result, fileId){
         <div style="text-align:left;"><div style="font-size:10px;color:var(--text2)">יתרה סגירה</div><div style="font-size:13px;font-weight:700;">${fmtAmount(s.closingBalance||0)}</div></div>
       </div>`:''}
       ${insightRows?`<div style="margin-bottom:8px;">${insightRows}</div>`:''}
-      ${txRows?`<div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:5px;display:flex;justify-content:space-between;"><span>${totalTx} פעולות</span><span style="color:var(--text3);font-weight:600;">לחץ על פעולה לשנות סוג / קטגוריה</span></div>
-      <div id="ar-txlist-${fileId}" style="max-height:300px;overflow-y:auto;">${txRows}</div>`:''}
+      ${txRows?`<div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:5px;">${totalTx} פעולות</div><div>${txRows}</div>`:''}
       ${result.estimatedDateRange?`<div style="font-size:11px;color:var(--text2);margin-top:8px;">📅 ${result.estimatedDateRange.from} → ${result.estimatedDateRange.to}</div>`:''}
     </div>`;
 }
@@ -1840,12 +1920,7 @@ async function confirmUpload(fileId){
 
   const txList = result.allTransactions?.length ? result.allTransactions : (result.sampleTransactions||[]);
   txList.forEach((t,i)=>{
-    const amt=t.amount||0;
-    let cat;
-    if(t.forcedCat){ cat=t.forcedCat; }
-    else if(amt>0){ cat=(t.incomeType&&BASE_INCOME_META[t.incomeType])?t.incomeType:categorize(t.desc||'',amt); }
-    else { cat=categorize(t.desc||'',amt); }
-    transactions.push({id:pf.fileId+'_'+i,accountKey:pf.assignedKey,date:t.date||dr.from+'-01',desc:t.desc||'פעולה',amount:amt,balance:t.balance||null,category:cat,source:pf.file.name});
+    transactions.push({id:pf.fileId+'_'+i,accountKey:pf.assignedKey,date:t.date||dr.from+'-01',desc:t.desc||'פעולה',amount:t.amount||0,balance:t.balance||null,category:((t.amount||0)>0?((t.incomeType&&BASE_INCOME_META[t.incomeType])?t.incomeType:categorize(t.desc||'',t.amount||0)):categorize(t.desc||'',t.amount||0)),source:pf.file.name});
   });
 
   // Add adjustment row if user provided one (from unresolved balance gap)
@@ -1978,6 +2053,14 @@ const BASE_CAT_META={
   transfer:{name:'העברות',icon:'🔄',color:'#94A3B8'},
   other:{name:'אחר',icon:'💰',color:'#CBD5E1'},
 };
+// merged view of base + custom categories
+function getCatMeta(id){
+  return customCategories[id]||BASE_CAT_META[id]||BASE_INCOME_META[id]||BASE_CAT_META.other;
+}
+function allCatMeta(){
+  return Object.assign({},BASE_CAT_META,customCategories);
+}
+
 // ── INCOME categories (parallel namespace, all ids prefixed inc_) ──
 const BASE_INCOME_META={
   inc_salary:{name:'משכורת',icon:'💼',color:'#4AFFA4'},
@@ -2020,14 +2103,6 @@ function migrateIncomeCategories(){
   });
   if(changed){try{saveTx();}catch(e){}}
   return changed;
-}
-
-// merged view of base + custom categories
-function getCatMeta(id){
-  return customCategories[id]||BASE_CAT_META[id]||BASE_INCOME_META[id]||BASE_CAT_META.other;
-}
-function allCatMeta(){
-  return Object.assign({},BASE_CAT_META,customCategories);
 }
 // strip digits / noise to get a stable merchant name
 function merchantName(desc){
@@ -2114,6 +2189,190 @@ function reassignIncomeSource(mn, catId){
     if((t.amount||0)>0 && merchantName(t.desc)===mn)t.category=catId;
   });
   saveTx();
+}
+
+// ═══════════════════════════
+//  RECONCILE VIEW (בדיקת התאמות)
+//  Drill into one account's parsed statement lines and the AI's
+//  category/supplier matches; edit either, with scope choice
+//  (this transaction only / all of the supplier — past + future).
+// ═══════════════════════════
+
+// Resolved supplier (סוג ספק) for a transaction:
+//  per-tx override (this-one edit) > supplier rename/merge map > raw merchant name
+function txSupplier(t){
+  if(t.supplier) return t.supplier;
+  const raw=merchantName(t.desc);
+  return supplierOverrides[raw]||raw;
+}
+// list of distinct existing suppliers (for merge suggestions)
+function allSuppliers(){
+  const set=new Set();
+  transactions.forEach(t=>{ if(t.amount<0) set.add(txSupplier(t)); });
+  return [...set].sort((a,b)=>a.localeCompare(b,'he'));
+}
+function countSameSupplier(t){
+  const s=txSupplier(t);
+  return transactions.filter(x=>txSupplier(x)===s).length;
+}
+
+let recAccountKey=null;
+let txEditId=null;          // transaction currently being edited
+let pendingEdit=null;       // {type:'category'|'supplier', value}
+
+function showReconcile(key){
+  recAccountKey=key;
+  showScreen('screen-reconcile');
+  renderReconcile();
+}
+
+function renderReconcile(){
+  const acc=getAllAccounts().find(a=>a.key===recAccountKey);
+  if(!acc){ showDashboard(); return; }
+  document.getElementById('rec-title').textContent=`${acc.icon} ${acc.name}`;
+  const list=transactions.filter(t=>t.accountKey===recAccountKey)
+    .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const expense=list.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const income=list.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+  document.getElementById('rec-sub').textContent=`${list.length} פעולות · בדוק ושנה סיווג`;
+  document.getElementById('rec-toolbar').innerHTML=`
+    <div class="rec-chip"><div class="n">${list.length}</div><div class="l">פעולות</div></div>
+    <div class="rec-chip"><div class="n" style="color:var(--red)">${fmtAmount(expense)}</div><div class="l">הוצאות</div></div>
+    <div class="rec-chip"><div class="n" style="color:var(--green)">${fmtAmount(income)}</div><div class="l">הכנסות</div></div>`;
+  const cats=allCatMeta();
+  const body=list.map(t=>{
+    const cat=cats[t.category]||cats.other||{icon:'💰',name:'אחר',color:'#CBD5E1'};
+    const sup=txSupplier(t);
+    const amtColor=t.amount<0?'var(--red)':'var(--green)';
+    return `<div class="rec-tx" onclick="openTxEdit('${t.id}')">
+      <div class="rec-tx-ico" style="background:${(cat.color||'#888')}22;color:${cat.color||'#ccc'}">${cat.icon}</div>
+      <div class="rec-tx-mid">
+        <div class="rec-tx-desc">${t.desc||'פעולה'}</div>
+        <div class="rec-tx-meta">
+          <span>${t.date||''}</span>
+          <span class="rec-tag">${cat.icon} ${cat.name}</span>
+          <span class="rec-tag sup">🏷️ ${sup}</span>
+        </div>
+      </div>
+      <div class="rec-tx-amt" style="color:${amtColor}">${t.amount<0?'-':'+'}${fmtAmount(t.amount)}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('rec-tx-list').innerHTML=body||'<div class="empty-state" style="padding:24px">אין פעולות לחשבון זה.<br>העלה דף בנק או פירוט כרטיס תחילה.</div>';
+}
+
+// ── edit modal ──
+function openTxEdit(id){
+  txEditId=id;
+  const t=transactions.find(x=>x.id===id);
+  if(!t)return;
+  const isInc=(t.amount||0)>0;
+  const cat=getCatMeta(t.category);
+  const sup=txSupplier(t);
+  const optList=isInc?Object.entries(BASE_INCOME_META):Object.entries(allCatMeta()).filter(([cid])=>!['salary','transfer'].includes(cid)&&!cid.startsWith('inc_'));
+  const grid=optList.map(([cid,m])=>`<div class="reassign-opt ${cid===t.category?'current':''}" onclick="chooseTxCategory('${cid}')">
+      <span style="font-size:18px;">${m.icon}</span><span>${m.name}</span></div>`).join('');
+  const expBtn=`<button onclick="flipTxKind(false)" style="flex:1;padding:11px;border-radius:11px;border:2px solid ${!isInc?'var(--red)':'var(--border)'};background:${!isInc?'var(--red-dim)':'var(--surface2)'};color:${!isInc?'var(--red)':'var(--text2)'};font-weight:800;font-size:14px;">📉 הוצאה</button>`;
+  const incBtn=`<button onclick="flipTxKind(true)" style="flex:1;padding:11px;border-radius:11px;border:2px solid ${isInc?'var(--green)':'var(--border)'};background:${isInc?'var(--green-dim)':'var(--surface2)'};color:${isInc?'var(--green)':'var(--text2)'};font-weight:800;font-size:14px;">📈 הכנסה</button>`;
+  document.getElementById('txedit-body').innerHTML=`
+    <div class="cat-modal-header">
+      <div class="cat-modal-icon">${cat.icon}</div>
+      <div><div class="cat-modal-title">${t.desc||'פעולה'}</div>
+        <div class="cat-modal-sub">${t.date||''} · <span style="color:${isInc?'var(--green)':'var(--red)'}">${isInc?'+':'-'}${fmtAmount(t.amount)}</span></div></div>
+    </div>
+    <div style="display:flex;gap:8px;margin:4px 0 12px;">${expBtn}${incBtn}</div>
+    <div class="rec-edit-row">
+      <div><div class="lbl">סוג ספק</div><div class="val">🏷️ ${sup}</div></div>
+      <button class="rec-edit-btn" onclick="promptSupplier()">שנה ספק</button>
+    </div>
+    <div style="font-size:12px;color:var(--text3);margin:10px 2px 6px;">${isInc?'סוג הכנסה:':'סוג הוצאה (קטגוריה):'}</div>
+    <div class="reassign-grid">${grid}</div>
+    <button class="modal-cancel" style="width:100%;margin-top:12px;" onclick="closeTxEdit()">סגור</button>`;
+  document.getElementById('txedit-modal').classList.add('open');
+}
+function closeTxEdit(){document.getElementById('txedit-modal').classList.remove('open');}
+
+// Flip a transaction between expense and income (changes sign + default category), per-transaction
+function flipTxKind(toIncome){
+  const t=transactions.find(x=>x.id===txEditId);
+  if(!t)return;
+  const abs=Math.abs(t.amount||0);
+  if(toIncome===((t.amount||0)>0)){ return; } // no change
+  t.amount=toIncome?abs:-abs;
+  t.category=toIncome?categorizeIncome((t.desc||'').toLowerCase()):categorize(t.desc||'',-abs);
+  t.catManual=true;
+  saveTx();
+  if(document.getElementById('screen-reconcile').classList.contains('active'))renderReconcile();
+  openTxEdit(txEditId);
+}
+
+function chooseTxCategory(catId){
+  pendingEdit={type:'category', value:catId};
+  openScopeChoice();
+}
+function promptSupplier(){
+  const t=transactions.find(x=>x.id===txEditId);
+  if(!t)return;
+  const current=txSupplier(t);
+  const others=allSuppliers().filter(s=>s!==current);
+  const hint=others.length?`\n\nספקים קיימים (כתוב שם זהה כדי לאחד):\n${others.slice(0,15).join(' · ')}`:'';
+  const name=prompt('שם הספק (שנה שם, או כתוב שם של ספק קיים כדי לאחד):'+hint, current);
+  if(!name||name.trim()===''||name.trim()===current)return;
+  pendingEdit={type:'supplier', value:name.trim()};
+  openScopeChoice();
+}
+
+// ── scope choice (this one / all of supplier) ──
+function openScopeChoice(){
+  const t=transactions.find(x=>x.id===txEditId);
+  if(!t){closeTxEdit();return;}
+  const sup=txSupplier(t);
+  const n=countSameSupplier(t);
+  const what=pendingEdit.type==='category'?'הקטגוריה':'הספק';
+  document.getElementById('txscope-body').innerHTML=`
+    <div class="reassign-title">על אילו פעולות להחיל את שינוי ${what}?</div>
+    <button class="rec-scope-btn" onclick="applyEdit('one')">
+      <strong>רק הפעולה הזו</strong><small>${t.desc||'פעולה'} · ${t.date||''}</small></button>
+    <button class="rec-scope-btn" onclick="applyEdit('all')">
+      <strong>כל הפעולות של "${sup}"</strong><small>${n} פעולות — קיימות ועתידיות (קדימה ואחורה)</small></button>
+    <button class="modal-cancel" style="width:100%;margin-top:4px;" onclick="closeTxScope()">ביטול</button>`;
+  document.getElementById('txscope-modal').classList.add('open');
+}
+function closeTxScope(){document.getElementById('txscope-modal').classList.remove('open');pendingEdit=null;}
+
+function applyEdit(scope){
+  const t=transactions.find(x=>x.id===txEditId);
+  if(!t||!pendingEdit){closeTxScope();return;}
+  const canon=txSupplier(t);
+
+  if(pendingEdit.type==='category'){
+    const catId=pendingEdit.value;
+    const inc=isIncomeCat(catId);
+    if(scope==='one'){
+      t.category=catId; t.catManual=true;
+    } else {
+      // all transactions of this supplier (past) + remember for future uploads
+      transactions.forEach(x=>{
+        if(txSupplier(x)===canon){
+          if(inc){ if((x.amount||0)>0){ x.category=catId; incomeOverrides[merchantName(x.desc)]=catId; } }
+          else { if((x.amount||0)<0){ x.category=catId; merchantOverrides[merchantName(x.desc)]=catId; } }
+        }
+      });
+    }
+  } else { // supplier
+    const newName=pendingEdit.value;
+    if(scope==='one'){
+      t.supplier=newName;
+    } else {
+      // remap every raw merchant name currently under this supplier → newName
+      transactions.forEach(x=>{
+        if(txSupplier(x)===canon){ supplierOverrides[merchantName(x.desc)]=newName; delete x.supplier; }
+      });
+    }
+  }
+  saveTx(); // also syncs to Firestore
+  closeTxScope(); closeTxEdit();
+  renderReconcile();
+  showToast('✅ השינוי נשמר');
 }
 
 // Create a brand-new empty category
@@ -2229,17 +2488,15 @@ function showReports(){showScreen('screen-reports');renderReports();}
 
 // reportMode: 'all' | 'month' | 'days'
 let reportMode='all';
-let reportMonth='2026-05';   // for month mode
-let reportDays={from:null,to:null}; // for days mode (YYYY-MM-DD)
-// reportView: 'expense' | 'income'
 let reportView='expense';
-
 function setReportView(view){
   reportView=view;
   document.getElementById('vtog-expense').classList.toggle('active',view==='expense');
   document.getElementById('vtog-income').classList.toggle('active',view==='income');
   renderReports();
 }
+let reportMonth='2026-05';   // for month mode
+let reportDays={from:null,to:null}; // for days mode (YYYY-MM-DD)
 
 function setReportMode(mode){
   reportMode=mode;
@@ -2392,10 +2649,10 @@ function renderReports(){
     </div>`;
   }).join('')||`<div class="empty-state">${isInc?'אין הכנסות בתקופה':'אין נתונים'}</div>`;
 
-  // Top sources / merchants
+  // Top sources / merchants (grouped by resolved supplier)
   const merchMap={};
   tx.filter(sideFilter).forEach(t=>{
-    const key=t.desc.replace(/\d+/g,'').trim();
+    const key=txSupplier(t);
     if(!merchMap[key])merchMap[key]={amt:0,count:0};
     merchMap[key].amt+=Math.abs(t.amount);merchMap[key].count++;
   });
@@ -2554,107 +2811,6 @@ function promptNewCategory(encName){
   doReassign(encName, id);
 }
 
-// ═══════════════════════════
-//  TRANSACTION TYPE / CATEGORY EDITOR
-//  ctx = {mode:'preview', fileId, index}  — edits pending (pre-save) tx
-//      | {mode:'saved', txId}             — edits a stored tx
-// ═══════════════════════════
-let txTypeCtx=null;
-
-function getEditTx(){
-  if(!txTypeCtx)return null;
-  if(txTypeCtx.mode==='preview'){
-    const pf=pendingFiles.find(f=>f.fileId===txTypeCtx.fileId);
-    if(!pf||!pf.aiResult)return null;
-    const arr=(pf.aiResult.allTransactions&&pf.aiResult.allTransactions.length)?pf.aiResult.allTransactions:pf.aiResult.sampleTransactions;
-    return arr?arr[txTypeCtx.index]:null;
-  }
-  return transactions.find(t=>t.id===txTypeCtx.txId)||null;
-}
-
-function openTxType(ctx){
-  txTypeCtx=ctx;
-  renderTxType();
-  document.getElementById('txtype-modal').classList.add('open');
-}
-function closeTxType(){document.getElementById('txtype-modal').classList.remove('open');txTypeCtx=null;}
-
-function renderTxType(){
-  const t=getEditTx();
-  if(!t){closeTxType();return;}
-  const amt=t.amount||0;
-  const isInc=amt>0;
-  const curCat=t.category||(t.forcedCat)||(isInc?categorizeIncome((t.desc||'').toLowerCase()):'other');
-  const opts=isInc?Object.entries(BASE_INCOME_META):Object.entries(allCatMeta()).filter(([id])=>!['salary','transfer'].includes(id)&&!id.startsWith('inc_'));
-  let html=`
-    <div class="tt-tx-head">
-      <div class="tt-tx-desc">${t.desc||'פעולה'}</div>
-      <div class="tt-tx-amt" style="color:${isInc?'var(--green)':'var(--red)'}">${isInc?'+':'−'} ${fmtAmount(amt)}</div>
-    </div>
-    <div class="tt-type-toggle">
-      <button class="tt-type-btn expense ${!isInc?'active':''}" onclick="setTxKind(false)">📉 הוצאה</button>
-      <button class="tt-type-btn income ${isInc?'active':''}" onclick="setTxKind(true)">📈 הכנסה</button>
-    </div>
-    <div class="tt-section-label">${isInc?'בחר סוג הכנסה:':'בחר קטגוריה:'}</div>
-    <div class="reassign-grid">`;
-  opts.forEach(([id,m])=>{
-    html+=`<div class="reassign-opt ${id===curCat?'current':''}" onclick="setTxCat('${id}')">
-      <span style="font-size:18px;">${m.icon}</span><span>${m.name}</span></div>`;
-  });
-  html+=`</div>
-    <button class="modal-cancel" style="width:100%;margin-top:10px;" onclick="closeTxType()">סגור</button>`;
-  document.getElementById('txtype-body').innerHTML=html;
-}
-
-// Flip between income / expense (changes the sign + resets to a default category)
-function setTxKind(toIncome){
-  const t=getEditTx();
-  if(!t)return;
-  const abs=Math.abs(t.amount||0);
-  t.amount=toIncome?abs:-abs;
-  const d=(t.desc||'').toLowerCase();
-  const newCat=toIncome?categorizeIncome(d):categorize(t.desc||'',-abs);
-  t.category=newCat;
-  if(txTypeCtx.mode==='preview'){ t.forcedCat=newCat; t.incomeType=toIncome?newCat:undefined; }
-  else { saveTx(); }
-  renderTxType();
-}
-
-// Pick a specific category / income type
-function setTxCat(catId){
-  const t=getEditTx();
-  if(!t)return;
-  t.category=catId;
-  if(txTypeCtx.mode==='preview'){
-    t.forcedCat=catId;
-    if((t.amount||0)>0)t.incomeType=catId;
-  }
-  if(txTypeCtx.mode==='saved'){
-    // remember the choice for this source so future uploads match
-    const mn=merchantName(t.desc);
-    if((t.amount||0)>0)incomeOverrides[mn]=catId; else merchantOverrides[mn]=catId;
-    saveTx();
-  }
-  applyTxEdit();
-  showToast('✅ הפעולה עודכנה');
-}
-
-// Re-render whatever view the edited tx lives in
-function applyTxEdit(){
-  if(!txTypeCtx){return;}
-  if(txTypeCtx.mode==='preview'){
-    const pf=pendingFiles.find(f=>f.fileId===txTypeCtx.fileId);
-    if(pf&&pf.aiResult){
-      const host=document.getElementById('ar-txlist-'+txTypeCtx.fileId);
-      if(host)host.innerHTML=buildPreviewTxRows(pf.aiResult, txTypeCtx.fileId);
-    }
-  } else {
-    const onReports=document.getElementById('screen-reports').classList.contains('active');
-    if(onReports)renderReports(); else renderDashboard();
-  }
-  closeTxType();
-}
-
 
 // ═══════════════════════════
 //  SETTINGS
@@ -2770,7 +2926,7 @@ function resetSetup(){
   if(!confirm('למחוק את כל ההגדרות והנתונים?'))return;
   try{localStorage.removeItem(STORAGE_KEY);localStorage.removeItem(TRANSACTIONS_KEY);}catch(e){}
   state={currentStep:0,selectedBanks:new Set(),bankInstances:{},selectedCards:new Set(),cardInstances:{},startDate:'2026-01',reminder:'biweekly',setupDone:false,cardBankLinks:{},verifiedMonths:{}};
-  transactions=[];uploadedFiles=[];pendingFiles=[];customCategories={};merchantOverrides={};notesArchive=[];
+  transactions=[];uploadedFiles=[];pendingFiles=[];customCategories={};merchantOverrides={};supplierOverrides={};incomeOverrides={};notesArchive=[];
   initOnboarding();showScreen('screen-onboarding');
 }
 
@@ -2867,7 +3023,7 @@ async function saveToCloud(){
         updatedAt: Date.now()
       });
       await setDoc(doc(db,'users',uid,'data','transactions'), {
-        transactions, uploadedFiles, customCategories, merchantOverrides, incomeOverrides, notesArchive,
+        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, notesArchive,
         updatedAt: Date.now()
       });
       setSyncStatus('synced');
@@ -2909,6 +3065,7 @@ async function loadFromCloud(uid){
           uploadedFiles = d.uploadedFiles||[];
           customCategories = d.customCategories||{};
           merchantOverrides = d.merchantOverrides||{};
+          supplierOverrides = d.supplierOverrides||{};
           incomeOverrides = d.incomeOverrides||{};
           notesArchive = d.notesArchive||[];
           migrateIncomeCategories();
@@ -3156,7 +3313,7 @@ ${Object.entries(monthlyTotals).sort().map(([m,v])=>`${m}: הוצאות ₪${Mat
     <button class="chat-send" id="chat-send-btn" onclick="sendChatMessage()">↑</button>
   </div>
   <div class="bottom-nav">
-    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
     <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
     <div class="nav-item active"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
     <div class="nav-item" onclick="showSettings()"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
