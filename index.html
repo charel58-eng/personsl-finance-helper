@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.8";
+const APP_VERSION = "2.10";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -221,6 +221,13 @@ button{cursor:pointer;}
 .rec-scope-btn:active{opacity:.7;}
 .rec-scope-btn strong{display:block;font-size:15px;margin-bottom:2px;}
 .rec-scope-btn small{color:var(--text3);font-size:12px;}
+.rec-bal{font-size:10px;color:var(--text3);margin-top:3px;font-weight:600;}
+.rec-gap{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--amber-dim);border:1px dashed var(--amber);border-radius:12px;padding:10px 12px;margin-bottom:7px;}
+.rec-gap.explained{background:var(--surface2);border-style:solid;border-color:var(--border2);}
+.rec-gap-txt{font-size:12px;color:var(--amber);line-height:1.5;}
+.rec-gap.explained .rec-gap-txt{color:var(--text2);}
+.rec-gap-btn{background:var(--amber);color:#1a1206;border:none;border-radius:8px;font-family:'Heebo';font-size:11px;font-weight:700;padding:6px 10px;cursor:pointer;white-space:nowrap;}
+.rec-gap-btn:active{opacity:.7;}
 
 /* Completeness bar */
 .completeness-bar{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
@@ -1069,6 +1076,9 @@ let transferLinks = [];
 let transferUnlinked = [];
 const TRANSFER_DATE_WINDOW_DAYS = 5; // max days between the two legs to still count as one transfer
 
+// gapExplanations: {"accKey|olderDate|newerDate": {text, date}} — user explanations for balance-continuity gaps
+let gapExplanations = {};
+
 let currentMonth = new Date();
 let alertsExpanded = false;
 
@@ -1106,7 +1116,7 @@ function loadState() {
     return true;
   }catch(e){return false;}
 }
-function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,customIncomeCats,catMetaOverrides,notesArchive,transferLinks,transferUnlinked}));}catch(e){}}
+function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,customIncomeCats,catMetaOverrides,notesArchive,transferLinks,transferUnlinked,gapExplanations}));}catch(e){}}
 function loadTx(){
   try{
     const raw=localStorage.getItem(TRANSACTIONS_KEY);
@@ -1123,6 +1133,7 @@ function loadTx(){
     notesArchive=d.notesArchive||[];
     transferLinks=d.transferLinks||[];
     transferUnlinked=d.transferUnlinked||[];
+    gapExplanations=d.gapExplanations||{};
     migrateIncomeCategories();
     detectInternalTransfers();
   }catch(e){}
@@ -1355,6 +1366,14 @@ function buildAlerts() {
         alerts.push(`${acc.icon} ${acc.name}: חסר ${MONTHS_FULL[parseInt(mo)-1]} ${y}`);
       });
     }
+  });
+  // unexplained balance-continuity gaps (bank accounts)
+  accounts.filter(a=>a.type==='bank').forEach(acc=>{
+    computeAccountGaps(transactions.filter(t=>t.accountKey===acc.key)).forEach(g=>{
+      if(!gapExplanations[accGapKey(acc.key,g.older,g.newer)]){
+        alerts.push(`${acc.icon} ${acc.name}: פער ברציפות ${fmtBal(g.amount)} בין ${g.newer} ל-${g.older} — חסר הסבר`);
+      }
+    });
   });
   return alerts;
 }
@@ -2161,6 +2180,7 @@ async function confirmUpload(fileId){
   transactions.filter(t=>t.accountKey===pf.assignedKey).forEach(t=>{const s=_sigExist(t);existCount[s]=(existCount[s]||0)+1;});
   const toAdd=[]; let skipped=0;
   fileTx.forEach(t=>{const s=_sigFile(t); if(existCount[s]>0){existCount[s]--;skipped++;} else toAdd.push(t);});
+  pf.hasOverlap = skipped>0; // file overlaps existing data → balance-continuity check is not meaningful
 
   // ── Fully-duplicate file: nothing new → offer delete-to-replace (no partial ingest possible) ──
   if(fileTx.length>0 && toAdd.length===0){
@@ -2171,7 +2191,9 @@ async function confirmUpload(fileId){
 
   // ── Run validations (unless already acknowledged) ──
   if(!pf.validationsAcked){
-    const issues=runValidations(result, pf.assignedKey);
+    let issues=runValidations(result, pf.assignedKey);
+    // on overlap the file's opening balance refers to already-covered dates → drop the false balance gap
+    if(pf.hasOverlap) issues=issues.filter(i=>i.type!=='balance');
     if(issues.length>0){
       showValidationIssues(pf, issues);
       return; // wait for user to resolve/acknowledge
@@ -2243,7 +2265,9 @@ function resolveAndSave(fileId){
   const pf=pendingFiles.find(f=>f.fileId===fileId);
   if(!pf) return;
   const result=pf.aiResult||{};
-  const issues=runValidations(result, pf.assignedKey);
+  let issues=runValidations(result, pf.assignedKey);
+  // on overlap, suppress the balance gap (its opening balance refers to already-covered dates)
+  if(pf.hasOverlap) issues=issues.filter(i=>i.type!=='balance');
 
   // Record all issues as notes
   issues.forEach(i=>addNote(pf.assignedKey, i.type, i.severity, i.text));
@@ -2502,6 +2526,80 @@ let recAccountKey=null;
 let txEditId=null;          // transaction currently being edited
 let txCatEditOpen=false;    // whether the category list is expanded in the tx editor
 let pendingEdit=null;       // {type:'category'|'supplier', value}
+let gapEditKey=null;        // which continuity-gap row is currently being explained inline
+
+// ── Balance continuity ──
+function fmtBal(b){ return (b<0?'−':'')+fmtAmount(b); }
+function accGapKey(accKey, older, newer){ return accKey+'|'+older+'|'+newer; }
+// Detect breaks in the recorded running balance between consecutive dated days.
+// Order-independent: derives each day's start/end balance from the (balance, amount) pairs.
+function computeAccountGaps(txList){
+  const cents=x=>Math.round(x*100);
+  const withBal=txList.filter(t=>t.balance!=null && t.date && !t.isAdjustment);
+  if(withBal.length<2) return [];
+  const byDate={};
+  withBal.forEach(t=>{ (byDate[t.date]=byDate[t.date]||[]).push(t); });
+  const dates=Object.keys(byDate).sort();
+  const endBal=ts=>{
+    if(ts.length===1) return ts[0].balance;
+    const befores=new Set(ts.map(t=>cents(t.balance - t.amount)));
+    const end=ts.find(t=>!befores.has(cents(t.balance)));
+    return end?end.balance:ts[ts.length-1].balance;
+  };
+  const startBal=ts=>{
+    if(ts.length===1) return ts[0].balance - ts[0].amount;
+    const afters=new Set(ts.map(t=>cents(t.balance)));
+    const st=ts.find(t=>!afters.has(cents(t.balance - t.amount)));
+    return st?(st.balance - st.amount):(ts[0].balance - ts[0].amount);
+  };
+  const gaps=[];
+  for(let i=1;i<dates.length;i++){
+    const prevEnd=endBal(byDate[dates[i-1]]);
+    const curStart=startBal(byDate[dates[i]]);
+    const gap=Math.round((curStart - prevEnd)*100)/100;
+    if(Math.abs(gap)>=1) gaps.push({older:dates[i-1], newer:dates[i], amount:gap});
+  }
+  return gaps;
+}
+function startGapEdit(key){ gapEditKey=key; renderReconcile(); setTimeout(()=>document.getElementById('gap-input')?.focus(),60); }
+function cancelGapEdit(){ gapEditKey=null; renderReconcile(); }
+function saveGapEdit(key){
+  const el=document.getElementById('gap-input');
+  const txt=el?el.value.trim():'';
+  if(txt) gapExplanations[key]={text:txt, date:new Date().toISOString().slice(0,10)};
+  else delete gapExplanations[key];
+  gapEditKey=null;
+  saveTx();
+  renderReconcile();
+  showToast(txt?'✅ הפער הוסבר':'הוסר ההסבר');
+}
+// Renders one continuity-gap row (unexplained / explained / inline-edit)
+function renderGapRow(accKey, older, newer, amount){
+  const key=accGapKey(accKey, older, newer);
+  const exp=gapExplanations[key];
+  if(gapEditKey===key){
+    return `<div class="rec-gap">
+      <div style="flex:1;min-width:0;">
+        <div class="rec-gap-txt">פער ${fmtBal(amount)} בין ${newer} ל-${older}</div>
+        <input id="gap-input" type="text" value="${exp?escHtml(exp.text):''}" placeholder="הסבר (למשל: חודש שלא הועלה / ריבית / עמלה)" style="width:100%;margin-top:6px;padding:8px;background:var(--surface3);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-family:'Heebo';font-size:12px;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <button class="rec-gap-btn" onclick="saveGapEdit('${key}')">שמור</button>
+        <button class="rec-gap-btn" style="background:var(--surface3);color:var(--text2);" onclick="cancelGapEdit()">ביטול</button>
+      </div>
+    </div>`;
+  }
+  if(exp){
+    return `<div class="rec-gap explained">
+      <div class="rec-gap-txt">✅ פער ${fmtBal(amount)} (${newer} ↔ ${older}) — מוסבר: ${escHtml(exp.text)}</div>
+      <button class="rec-gap-btn" style="background:var(--surface3);color:var(--text2);" onclick="startGapEdit('${key}')">ערוך</button>
+    </div>`;
+  }
+  return `<div class="rec-gap">
+    <div class="rec-gap-txt">⚠️ פער ברציפות: ${fmtBal(amount)} בין ${newer} ל-${older} — חסר הסבר לפער</div>
+    <button class="rec-gap-btn" onclick="startGapEdit('${key}')">הסבר פער</button>
+  </div>`;
+}
 
 function showReconcile(key){
   recAccountKey=key;
@@ -2523,11 +2621,25 @@ function renderReconcile(){
     <div class="rec-chip"><div class="n" style="color:var(--red)">${fmtAmount(expense)}</div><div class="l">הוצאות</div></div>
     <div class="rec-chip"><div class="n" style="color:var(--green)">${fmtAmount(income)}</div><div class="l">הכנסות</div></div>`;
   const cats=allCatMeta();
-  const body=list.map(t=>{
+  const isBank=acc.type==='bank';
+  // continuity gaps (bank accounts only) → place a marker just above the older-date block
+  const gapBeforeOlder={};
+  if(isBank){
+    computeAccountGaps(list).forEach(g=>{ gapBeforeOlder[g.older]={amount:g.amount, newer:g.newer}; });
+  }
+  let prevDate=null;
+  const parts=[];
+  list.forEach(t=>{
+    if(t.date!==prevDate){
+      const g=gapBeforeOlder[t.date];
+      if(g) parts.push(renderGapRow(acc.key, t.date, g.newer, g.amount));
+      prevDate=t.date;
+    }
     const cat=cats[t.category]||cats.other||{icon:'💰',name:'אחר',color:'#CBD5E1'};
     const sup=txSupplier(t);
     const amtColor=t.amount<0?'var(--red)':'var(--green)';
-    return `<div class="rec-tx" onclick="openTxEdit('${t.id}')">
+    const balLine=(isBank && t.balance!=null)?`<div class="rec-bal">יתרה: ${fmtBal(t.balance)}</div>`:'';
+    parts.push(`<div class="rec-tx" onclick="openTxEdit('${t.id}')">
       <div class="rec-tx-ico" style="background:${(cat.color||'#888')}22;color:${cat.color||'#ccc'}">${cat.icon}</div>
       <div class="rec-tx-mid">
         <div class="rec-tx-desc">${t.desc||'פעולה'}</div>
@@ -2537,10 +2649,13 @@ function renderReconcile(){
           <span class="rec-tag sup">🏷️ ${sup}</span>
         </div>
       </div>
-      <div class="rec-tx-amt" style="color:${amtColor}">${t.amount<0?'-':'+'}${fmtAmount(t.amount)}</div>
-    </div>`;
-  }).join('');
-  document.getElementById('rec-tx-list').innerHTML=body||'<div class="empty-state" style="padding:24px">אין פעולות לחשבון זה.<br>העלה דף בנק או פירוט כרטיס תחילה.</div>';
+      <div class="rec-tx-amt" style="text-align:left;">
+        <div style="color:${amtColor}">${t.amount<0?'-':'+'}${fmtAmount(t.amount)}</div>
+        ${balLine}
+      </div>
+    </div>`);
+  });
+  document.getElementById('rec-tx-list').innerHTML=parts.join('')||'<div class="empty-state" style="padding:24px">אין פעולות לחשבון זה.<br>העלה דף בנק או פירוט כרטיס תחילה.</div>';
 }
 
 // ── edit modal ──
@@ -3604,7 +3719,7 @@ async function saveToCloud(){
         updatedAt: Date.now()
       });
       await setDoc(doc(db,'users',uid,'data','transactions'), {
-        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, catMetaOverrides, notesArchive, transferLinks, transferUnlinked,
+        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, catMetaOverrides, notesArchive, transferLinks, transferUnlinked, gapExplanations,
         updatedAt: Date.now()
       });
       setSyncStatus('synced');
@@ -3653,6 +3768,7 @@ async function loadFromCloud(uid){
           notesArchive = d.notesArchive||[];
           transferLinks = d.transferLinks||[];
           transferUnlinked = d.transferUnlinked||[];
+          gapExplanations = d.gapExplanations||{};
           migrateIncomeCategories();
           detectInternalTransfers();
           _origSaveTx();
