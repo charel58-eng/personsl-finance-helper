@@ -48,9 +48,15 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "1.8";
+const APP_VERSION = "2.0";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
+
+// ── מגבלות סבירות לקובץ (בדיקה לפני שליחה ל-AI) ──
+// המטרה: לא לחתוך נתונים בשקט. קובץ ארוך מדי נחסם עם הודעה למשתמש לפצל אותו.
+const MAX_PDF_PAGES     = 10;     // PDF ארוך מ-10 עמודים → לפצל
+const MAX_TABULAR_ROWS  = 400;    // מקביל ל-~10 עמודים בקובץ טבלאי (Excel/CSV)
+const MAX_CONTENT_CHARS = 30000;  // תקרת תווים אחרי חילוץ — מעבר לזה לא נשלח ל-AI
 // ═══════════════════════════════════════════════
 </script>
 <style>
@@ -184,6 +190,37 @@ button{cursor:pointer;}
 .status-pill.red{background:var(--red-dim);color:var(--red);border:1px solid var(--red-glow);}
 .btn-upload{padding:7px 12px;background:var(--blue-dim);border:1px solid var(--blue-glow);border-radius:10px;font-size:12px;font-weight:700;color:var(--blue);cursor:pointer;white-space:nowrap;}
 .btn-upload:active{opacity:0.7;}
+.btn-reconcile{padding:7px 12px;background:var(--green-dim);border:1px solid var(--green);border-radius:10px;font-size:12px;font-weight:700;color:var(--green);cursor:pointer;white-space:nowrap;}
+.btn-reconcile:active{opacity:0.7;}
+
+/* reconcile view */
+#screen-reconcile{padding-bottom:calc(80px + env(safe-area-inset-bottom));}
+.rec-head{display:flex;align-items:center;gap:10px;padding:14px 16px 6px;}
+.rec-back{background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text2);font-size:13px;font-weight:700;padding:7px 12px;cursor:pointer;}
+.rec-title{font-size:18px;font-weight:800;}
+.rec-sub{font-size:12px;color:var(--text3);margin-top:2px;}
+.rec-toolbar{display:flex;gap:8px;padding:8px 16px;flex-wrap:wrap;}
+.rec-chip{flex:1;min-width:90px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:8px 10px;text-align:center;}
+.rec-chip .n{font-size:16px;font-weight:800;}
+.rec-chip .l{font-size:10px;color:var(--text3);}
+.rec-tx-list{padding:4px 12px;}
+.rec-tx{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:7px;cursor:pointer;}
+.rec-tx:active{opacity:.7;}
+.rec-tx-ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;}
+.rec-tx-mid{flex:1;min-width:0;}
+.rec-tx-desc{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rec-tx-meta{font-size:11px;color:var(--text3);margin-top:2px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.rec-tag{background:var(--surface3);border-radius:6px;padding:1px 6px;font-size:10px;color:var(--text2);}
+.rec-tag.sup{background:var(--blue-dim);color:var(--blue);}
+.rec-tx-amt{font-weight:800;font-size:14px;white-space:nowrap;}
+.rec-edit-row{display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border-radius:12px;padding:12px 14px;margin-bottom:8px;}
+.rec-edit-row .lbl{font-size:12px;color:var(--text3);}
+.rec-edit-row .val{font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px;}
+.rec-edit-btn{background:var(--blue-dim);border:1px solid var(--blue-glow);color:var(--blue);border-radius:9px;font-size:12px;font-weight:700;padding:6px 12px;cursor:pointer;}
+.rec-scope-btn{width:100%;text-align:right;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:8px;cursor:pointer;color:var(--text);font-size:14px;}
+.rec-scope-btn:active{opacity:.7;}
+.rec-scope-btn strong{display:block;font-size:15px;margin-bottom:2px;}
+.rec-scope-btn small{color:var(--text3);font-size:12px;}
 
 /* Completeness bar */
 .completeness-bar{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
@@ -521,6 +558,36 @@ button{cursor:pointer;}
   </div>
 </div>
 
+<!-- Transaction edit modal (category + supplier) -->
+<div class="modal-overlay" id="txedit-modal" onclick="if(event.target===this)closeTxEdit()">
+  <div class="modal-box">
+    <div id="txedit-body"></div>
+  </div>
+</div>
+
+<!-- Scope choice modal (this one vs all of supplier) -->
+<div class="modal-overlay" id="txscope-modal" onclick="if(event.target===this)closeTxScope()">
+  <div class="modal-box">
+    <div id="txscope-body"></div>
+  </div>
+</div>
+
+<!-- ═══ RECONCILE SCREEN ═══ -->
+<div class="screen" id="screen-reconcile">
+  <div class="rec-head">
+    <button class="rec-back" onclick="showDashboard()">→ חזרה</button>
+    <div><div class="rec-title" id="rec-title">בדיקת התאמות</div><div class="rec-sub" id="rec-sub"></div></div>
+  </div>
+  <div class="rec-toolbar" id="rec-toolbar"></div>
+  <div class="rec-tx-list" id="rec-tx-list"></div>
+  <div class="bottom-nav">
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
+    <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
+    <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
+    <div class="nav-item" onclick="showSettings()"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
+  </div>
+</div>
+
 <!-- ═══ AUTH SCREEN ═══ -->
 <div class="screen" id="screen-auth" style="display:none;align-items:center;justify-content:center;">
   <div id="auth-content">
@@ -678,7 +745,7 @@ button{cursor:pointer;}
   </div>
 
   <div class="bottom-nav">
-    <div class="nav-item active" id="nav-home" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
+    <div class="nav-item active" id="nav-home" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
     <div class="nav-item" id="nav-reports" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
     <div class="nav-item" id="nav-chat" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
     <div class="nav-item" id="nav-settings" onclick="showSettings()"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
@@ -766,7 +833,7 @@ button{cursor:pointer;}
   <div style="text-align:center;padding:16px;font-size:11px;color:var(--text3);" id="settings-version">גרסה —</div>
 
   <div class="bottom-nav">
-    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
     <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
     <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
     <div class="nav-item active"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
@@ -848,7 +915,7 @@ button{cursor:pointer;}
   </div>
 
   <div class="bottom-nav">
-    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
     <div class="nav-item active"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
     <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
     <div class="nav-item" onclick="showSettings()"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
@@ -909,6 +976,8 @@ let pendingFiles = [];
 let customCategories = {};
 // merchantOverrides: {merchantName: catId}  — manual reassignment of a supplier
 let merchantOverrides = {};
+// supplierOverrides: {rawMerchantName: canonicalSupplierName} — rename/merge of a supplier (סוג ספק)
+let supplierOverrides = {};
 
 let currentMonth = new Date();
 let alertsExpanded = false;
@@ -947,7 +1016,7 @@ function loadState() {
     return true;
   }catch(e){return false;}
 }
-function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,notesArchive}));}catch(e){}}
+function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,notesArchive}));}catch(e){}}
 function loadTx(){
   try{
     const raw=localStorage.getItem(TRANSACTIONS_KEY);
@@ -957,6 +1026,7 @@ function loadTx(){
     uploadedFiles=d.uploadedFiles||[];
     customCategories=d.customCategories||{};
     merchantOverrides=d.merchantOverrides||{};
+    supplierOverrides=d.supplierOverrides||{};
     notesArchive=d.notesArchive||[];
   }catch(e){}
 }
@@ -1276,6 +1346,7 @@ function renderAccountSection(containerId, type){
         <div class="acc-right">
           <span class="status-pill ${statusClass}">${statusText}</span>
           <button class="btn-upload" onclick="showUploadForAccount('${acc.key}')">📤 העלה</button>
+          <button class="btn-reconcile" onclick="showReconcile('${acc.key}')">🔎 בדיקת התאמות</button>
         </div>
       </div>
       <div class="completeness-bar">
@@ -1382,13 +1453,38 @@ async function readPdfText(file){
   lib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   const buf=await file.arrayBuffer();
   const pdf=await lib.getDocument({data:buf}).promise;
+  const pages=pdf.numPages;
+  // בדיקה לפני חילוץ: אם יש יותר מדי עמודים — מחזירים מיד בלי לבזבז עבודה
+  if(pages>MAX_PDF_PAGES){ return { text:'', pages, tooLong:true }; }
   let text='';
-  for(let p=1;p<=pdf.numPages;p++){
+  for(let p=1;p<=pages;p++){
     const page=await pdf.getPage(p);
     const content=await page.getTextContent();
     text+=content.items.map(i=>i.str).join(' ')+'\n';
   }
-  return text;
+  return { text, pages, tooLong:false };
+}
+
+// בדיקת סבירות לקבצים טבלאיים + תקרת תווים כללית (לפני שליחה ל-AI)
+function checkFileReasonable(ext, content){
+  if(ext==='csv'||ext==='xlsx'||ext==='xls'){
+    const rows=content.split('\n').filter(l=>l.trim().length>0).length;
+    if(rows>MAX_TABULAR_ROWS) return `הקובץ מכיל ${rows} שורות (המקסימום ${MAX_TABULAR_ROWS})`;
+  }
+  if(content.length>MAX_CONTENT_CHARS){
+    return `הקובץ ארוך מדי (~${Math.round(content.length/1000)}K תווים, המקסימום ${MAX_CONTENT_CHARS/1000}K)`;
+  }
+  return null; // תקין
+}
+
+// הודעת "קובץ ארוך מדי" — לא נשלח ל-AI, מבקש מהמשתמש לפצל
+function showFileTooLong(assignDiv, pf, detail){
+  assignDiv.innerHTML=`<div class="assign-ambiguous">
+      📄 <strong>הקובץ ארוך מדי לניתוח</strong><br>
+      נא לפצל את הקובץ או לשלוח קובץ לתקופה קצרה יותר.
+      ${detail?`<br><small style="opacity:.8">${detail}</small>`:''}
+    </div>
+    <button class="btn-confirm-upload" style="background:var(--surface2);color:var(--text2)" onclick="removePendingFile('${pf.fileId}')">הסר קובץ</button>`;
 }
 
 async function analyzeFile(pf, ext){
@@ -1405,7 +1501,9 @@ async function analyzeFile(pf, ext){
       const wb=XLSX.read(buf,{type:'array'});
       fileContent=wb.SheetNames.map(name=>XLSX.utils.sheet_to_csv(wb.Sheets[name])).join('\n');
     } else if(ext==='pdf'){
-      fileContent=await readPdfText(pf.file);
+      const r=await readPdfText(pf.file);
+      if(r.tooLong){ showFileTooLong(assignDiv, pf, `הקובץ מכיל ${r.pages} עמודים (המקסימום ${MAX_PDF_PAGES})`); return; }
+      fileContent=r.text;
     }
   }catch(e){
     assignDiv.innerHTML='<div class="assign-ambiguous">⚠️ שגיאה בקריאת הקובץ: '+e.message+'</div>';
@@ -1416,6 +1514,10 @@ async function analyzeFile(pf, ext){
     renderAssignUI(pf, fallbackResult(getAllAccounts(),'לא הצלחתי לקרוא תוכן מהקובץ'), getAllAccounts(), assignDiv);
     return;
   }
+
+  // ── שער סבירות: בודק לפני שליחה ל-AI שהקובץ לא ארוך מדי ──
+  const tooLongReason=checkFileReasonable(ext, fileContent);
+  if(tooLongReason){ showFileTooLong(assignDiv, pf, tooLongReason); return; }
 
   assignDiv.innerHTML=`<div style="padding:12px;background:var(--surface2);border-radius:10px;margin-top:8px;">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
@@ -1449,6 +1551,7 @@ async function analyzeFile(pf, ext){
     }
     renderAssignUI(pf, result, getAllAccounts(), assignDiv);
   } catch(e) {
+    if(e.code==='TOO_LONG'){ showFileTooLong(assignDiv, pf, 'התברר שהקובץ מכיל יותר מדי תנועות לניתוח בבת אחת'); return; }
     console.error('AI analysis failed:', e);
     assignDiv.innerHTML=`<div class="assign-ambiguous">⚠️ שגיאת AI: ${e.message}<br><small>נסה שוב או בחר חשבון ידנית</small></div>
       <div class="assign-options">${getAllAccounts().map(a=>`<div class="assign-opt" data-key="${a.key}" onclick="assignFile('${pf.fileId}','${a.key}',this)">${a.icon} ${a.name}</div>`).join('')}</div>
@@ -1536,6 +1639,10 @@ ${contentForAI}
     max_tokens: 8000,
     messages: [{ role: 'user', content: prompt }]
   });
+  // post-flight: אם המודל נחתך כי הגיע לתקרת הפלט — ה-JSON חלקי, התנועות נקטעו → "ארוך מדי"
+  if(data.stop_reason==='max_tokens'){
+    const err=new Error('הקובץ ארוך מדי'); err.code='TOO_LONG'; throw err;
+  }
   const raw = data.content?.find(c => c.type === 'text')?.text || '';
 
   // Parse JSON — strip markdown fences, then extract the JSON object
@@ -2008,6 +2115,169 @@ function reassignMerchant(mn, catId){
   saveTx();
 }
 
+// ═══════════════════════════
+//  RECONCILE VIEW (בדיקת התאמות)
+//  Drill into one account's parsed statement lines and the AI's
+//  category/supplier matches; edit either, with scope choice
+//  (this transaction only / all of the supplier — past + future).
+// ═══════════════════════════
+
+// Resolved supplier (סוג ספק) for a transaction:
+//  per-tx override (this-one edit) > supplier rename/merge map > raw merchant name
+function txSupplier(t){
+  if(t.supplier) return t.supplier;
+  const raw=merchantName(t.desc);
+  return supplierOverrides[raw]||raw;
+}
+// list of distinct existing suppliers (for merge suggestions)
+function allSuppliers(){
+  const set=new Set();
+  transactions.forEach(t=>{ if(t.amount<0) set.add(txSupplier(t)); });
+  return [...set].sort((a,b)=>a.localeCompare(b,'he'));
+}
+function countSameSupplier(t){
+  const s=txSupplier(t);
+  return transactions.filter(x=>txSupplier(x)===s).length;
+}
+
+let recAccountKey=null;
+let txEditId=null;          // transaction currently being edited
+let pendingEdit=null;       // {type:'category'|'supplier', value}
+
+function showReconcile(key){
+  recAccountKey=key;
+  showScreen('screen-reconcile');
+  renderReconcile();
+}
+
+function renderReconcile(){
+  const acc=getAllAccounts().find(a=>a.key===recAccountKey);
+  if(!acc){ showDashboard(); return; }
+  document.getElementById('rec-title').textContent=`${acc.icon} ${acc.name}`;
+  const list=transactions.filter(t=>t.accountKey===recAccountKey)
+    .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const expense=list.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const income=list.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+  document.getElementById('rec-sub').textContent=`${list.length} פעולות · בדוק ושנה סיווג`;
+  document.getElementById('rec-toolbar').innerHTML=`
+    <div class="rec-chip"><div class="n">${list.length}</div><div class="l">פעולות</div></div>
+    <div class="rec-chip"><div class="n" style="color:var(--red)">${fmtAmount(expense)}</div><div class="l">הוצאות</div></div>
+    <div class="rec-chip"><div class="n" style="color:var(--green)">${fmtAmount(income)}</div><div class="l">הכנסות</div></div>`;
+  const cats=allCatMeta();
+  const body=list.map(t=>{
+    const cat=cats[t.category]||cats.other||{icon:'💰',name:'אחר',color:'#CBD5E1'};
+    const sup=txSupplier(t);
+    const amtColor=t.amount<0?'var(--red)':'var(--green)';
+    return `<div class="rec-tx" onclick="openTxEdit('${t.id}')">
+      <div class="rec-tx-ico" style="background:${(cat.color||'#888')}22;color:${cat.color||'#ccc'}">${cat.icon}</div>
+      <div class="rec-tx-mid">
+        <div class="rec-tx-desc">${t.desc||'פעולה'}</div>
+        <div class="rec-tx-meta">
+          <span>${t.date||''}</span>
+          <span class="rec-tag">${cat.icon} ${cat.name}</span>
+          <span class="rec-tag sup">🏷️ ${sup}</span>
+        </div>
+      </div>
+      <div class="rec-tx-amt" style="color:${amtColor}">${t.amount<0?'-':'+'}${fmtAmount(t.amount)}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('rec-tx-list').innerHTML=body||'<div class="empty-state" style="padding:24px">אין פעולות לחשבון זה.<br>העלה דף בנק או פירוט כרטיס תחילה.</div>';
+}
+
+// ── edit modal ──
+function openTxEdit(id){
+  txEditId=id;
+  const t=transactions.find(x=>x.id===id);
+  if(!t)return;
+  const cats=allCatMeta();
+  const cat=cats[t.category]||cats.other;
+  const sup=txSupplier(t);
+  const expenseCats=Object.entries(cats).filter(([id])=>!['salary','transfer'].includes(id));
+  const grid=expenseCats.map(([cid,m])=>`<div class="reassign-opt ${cid===t.category?'current':''}" onclick="chooseTxCategory('${cid}')">
+      <span style="font-size:18px;">${m.icon}</span><span>${m.name}</span></div>`).join('');
+  document.getElementById('txedit-body').innerHTML=`
+    <div class="cat-modal-header">
+      <div class="cat-modal-icon">${cat.icon}</div>
+      <div><div class="cat-modal-title">${t.desc||'פעולה'}</div>
+        <div class="cat-modal-sub">${t.date||''} · ${t.amount<0?'-':'+'}${fmtAmount(t.amount)}</div></div>
+    </div>
+    <div class="rec-edit-row">
+      <div><div class="lbl">סוג ספק</div><div class="val">🏷️ ${sup}</div></div>
+      <button class="rec-edit-btn" onclick="promptSupplier()">שנה ספק</button>
+    </div>
+    <div style="font-size:12px;color:var(--text3);margin:10px 2px 6px;">סוג הוצאה (קטגוריה):</div>
+    <div class="reassign-grid">${grid}</div>
+    <button class="modal-cancel" style="width:100%;margin-top:12px;" onclick="closeTxEdit()">סגור</button>`;
+  document.getElementById('txedit-modal').classList.add('open');
+}
+function closeTxEdit(){document.getElementById('txedit-modal').classList.remove('open');}
+
+function chooseTxCategory(catId){
+  pendingEdit={type:'category', value:catId};
+  openScopeChoice();
+}
+function promptSupplier(){
+  const t=transactions.find(x=>x.id===txEditId);
+  if(!t)return;
+  const current=txSupplier(t);
+  const others=allSuppliers().filter(s=>s!==current);
+  const hint=others.length?`\n\nספקים קיימים (כתוב שם זהה כדי לאחד):\n${others.slice(0,15).join(' · ')}`:'';
+  const name=prompt('שם הספק (שנה שם, או כתוב שם של ספק קיים כדי לאחד):'+hint, current);
+  if(!name||name.trim()===''||name.trim()===current)return;
+  pendingEdit={type:'supplier', value:name.trim()};
+  openScopeChoice();
+}
+
+// ── scope choice (this one / all of supplier) ──
+function openScopeChoice(){
+  const t=transactions.find(x=>x.id===txEditId);
+  if(!t){closeTxEdit();return;}
+  const sup=txSupplier(t);
+  const n=countSameSupplier(t);
+  const what=pendingEdit.type==='category'?'הקטגוריה':'הספק';
+  document.getElementById('txscope-body').innerHTML=`
+    <div class="reassign-title">על אילו פעולות להחיל את שינוי ${what}?</div>
+    <button class="rec-scope-btn" onclick="applyEdit('one')">
+      <strong>רק הפעולה הזו</strong><small>${t.desc||'פעולה'} · ${t.date||''}</small></button>
+    <button class="rec-scope-btn" onclick="applyEdit('all')">
+      <strong>כל הפעולות של "${sup}"</strong><small>${n} פעולות — קיימות ועתידיות (קדימה ואחורה)</small></button>
+    <button class="modal-cancel" style="width:100%;margin-top:4px;" onclick="closeTxScope()">ביטול</button>`;
+  document.getElementById('txscope-modal').classList.add('open');
+}
+function closeTxScope(){document.getElementById('txscope-modal').classList.remove('open');pendingEdit=null;}
+
+function applyEdit(scope){
+  const t=transactions.find(x=>x.id===txEditId);
+  if(!t||!pendingEdit){closeTxScope();return;}
+  const canon=txSupplier(t);
+
+  if(pendingEdit.type==='category'){
+    const catId=pendingEdit.value;
+    if(scope==='one'){
+      t.category=catId; t.catManual=true;
+    } else {
+      // all transactions of this supplier (past) + remember for future uploads
+      transactions.forEach(x=>{
+        if(txSupplier(x)===canon){ x.category=catId; merchantOverrides[merchantName(x.desc)]=catId; }
+      });
+    }
+  } else { // supplier
+    const newName=pendingEdit.value;
+    if(scope==='one'){
+      t.supplier=newName;
+    } else {
+      // remap every raw merchant name currently under this supplier → newName
+      transactions.forEach(x=>{
+        if(txSupplier(x)===canon){ supplierOverrides[merchantName(x.desc)]=newName; delete x.supplier; }
+      });
+    }
+  }
+  saveTx(); // also syncs to Firestore
+  closeTxScope(); closeTxEdit();
+  renderReconcile();
+  showToast('✅ השינוי נשמר');
+}
+
 // Create a brand-new empty category
 function createCategory(name, icon, color){
   const id='cust_'+Date.now();
@@ -2271,7 +2541,7 @@ function renderReports(){
   // Top merchants
   const merchMap={};
   tx.filter(t=>t.amount<0).forEach(t=>{
-    const key=t.desc.replace(/\d+/g,'').trim();
+    const key=txSupplier(t);
     if(!merchMap[key])merchMap[key]={amt:0,count:0};
     merchMap[key].amt+=Math.abs(t.amount);merchMap[key].count++;
   });
@@ -2608,7 +2878,7 @@ async function saveToCloud(){
         updatedAt: Date.now()
       });
       await setDoc(doc(db,'users',uid,'data','transactions'), {
-        transactions, uploadedFiles, customCategories, merchantOverrides, notesArchive,
+        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, notesArchive,
         updatedAt: Date.now()
       });
       setSyncStatus('synced');
@@ -2650,6 +2920,7 @@ async function loadFromCloud(uid){
           uploadedFiles = d.uploadedFiles||[];
           customCategories = d.customCategories||{};
           merchantOverrides = d.merchantOverrides||{};
+          supplierOverrides = d.supplierOverrides||{};
           notesArchive = d.notesArchive||[];
           _origSaveTx();
         }
@@ -2886,7 +3157,7 @@ ${Object.entries(monthlyTotals).sort().map(([m,v])=>`${m}: הוצאות ₪${Mat
     <button class="chat-send" id="chat-send-btn" onclick="sendChatMessage()">↑</button>
   </div>
   <div class="bottom-nav">
-    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">דשבורד</div></div>
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
     <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
     <div class="nav-item active"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
     <div class="nav-item" onclick="showSettings()"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
