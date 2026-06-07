@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.1";
+const APP_VERSION = "2.2";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -990,6 +990,8 @@ let merchantOverrides = {};
 let supplierOverrides = {};
 // incomeOverrides: {merchantName: incCatId} — manual reassignment of an INCOME source
 let incomeOverrides = {};
+// customIncomeCats: {inc_cust_*: {name,icon,color}} — user-created income types
+let customIncomeCats = {};
 
 let currentMonth = new Date();
 let alertsExpanded = false;
@@ -1028,7 +1030,7 @@ function loadState() {
     return true;
   }catch(e){return false;}
 }
-function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,notesArchive}));}catch(e){}}
+function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,customIncomeCats,notesArchive}));}catch(e){}}
 function loadTx(){
   try{
     const raw=localStorage.getItem(TRANSACTIONS_KEY);
@@ -1040,6 +1042,7 @@ function loadTx(){
     merchantOverrides=d.merchantOverrides||{};
     supplierOverrides=d.supplierOverrides||{};
     incomeOverrides=d.incomeOverrides||{};
+    customIncomeCats=d.customIncomeCats||{};
     notesArchive=d.notesArchive||[];
     migrateIncomeCategories();
   }catch(e){}
@@ -2055,10 +2058,14 @@ const BASE_CAT_META={
 };
 // merged view of base + custom categories
 function getCatMeta(id){
-  return customCategories[id]||BASE_CAT_META[id]||BASE_INCOME_META[id]||BASE_CAT_META.other;
+  return customCategories[id]||customIncomeCats[id]||BASE_CAT_META[id]||BASE_INCOME_META[id]||BASE_CAT_META.other;
 }
 function allCatMeta(){
   return Object.assign({},BASE_CAT_META,customCategories);
+}
+// merged view of base + custom INCOME categories
+function incomeCatMeta(){
+  return Object.assign({},BASE_INCOME_META,customIncomeCats);
 }
 
 // ── INCOME categories (parallel namespace, all ids prefixed inc_) ──
@@ -2268,7 +2275,7 @@ function openTxEdit(id){
   const isInc=(t.amount||0)>0;
   const cat=getCatMeta(t.category);
   const sup=txSupplier(t);
-  const optList=isInc?Object.entries(BASE_INCOME_META):Object.entries(allCatMeta()).filter(([cid])=>!['salary','transfer'].includes(cid)&&!cid.startsWith('inc_'));
+  const optList=isInc?Object.entries(incomeCatMeta()):Object.entries(allCatMeta()).filter(([cid])=>!['salary','transfer'].includes(cid)&&!cid.startsWith('inc_'));
   const grid=optList.map(([cid,m])=>`<div class="reassign-opt ${cid===t.category?'current':''}" onclick="chooseTxCategory('${cid}')">
       <span style="font-size:18px;">${m.icon}</span><span>${m.name}</span></div>`).join('');
   const expBtn=`<button onclick="flipTxKind(false)" style="flex:1;padding:11px;border-radius:11px;border:2px solid ${!isInc?'var(--red)':'var(--border)'};background:${!isInc?'var(--red-dim)':'var(--surface2)'};color:${!isInc?'var(--red)':'var(--text2)'};font-weight:800;font-size:14px;">📉 הוצאה</button>`;
@@ -2286,7 +2293,8 @@ function openTxEdit(id){
     </div>
     <div style="font-size:12px;color:var(--text3);margin:10px 2px 6px;">${isInc?'סוג הכנסה:':'סוג הוצאה (קטגוריה):'}</div>
     <div class="reassign-grid">${grid}</div>
-    <button class="modal-cancel" style="width:100%;margin-top:12px;" onclick="closeTxEdit()">סגור</button>`;
+    <button class="reassign-new" onclick="promptNewCatForTx(${isInc})">➕ ${isInc?'סוג הכנסה חדש':'קטגוריה חדשה'}</button>
+    <button class="modal-cancel" style="width:100%;margin-top:8px;" onclick="closeTxEdit()">סגור</button>`;
   document.getElementById('txedit-modal').classList.add('open');
 }
 function closeTxEdit(){document.getElementById('txedit-modal').classList.remove('open');}
@@ -2301,13 +2309,22 @@ function flipTxKind(toIncome){
   t.category=toIncome?categorizeIncome((t.desc||'').toLowerCase()):categorize(t.desc||'',-abs);
   t.catManual=true;
   saveTx();
-  if(document.getElementById('screen-reconcile').classList.contains('active'))renderReconcile();
+  if(document.getElementById('screen-reconcile')?.classList.contains('active'))renderReconcile();
+  if(document.getElementById('screen-reports')?.classList.contains('active'))renderReports();
   openTxEdit(txEditId);
 }
 
 function chooseTxCategory(catId){
   pendingEdit={type:'category', value:catId};
   openScopeChoice();
+}
+// Create a new category (expense) or income type that isn't in the list, then assign it
+function promptNewCatForTx(isInc){
+  isInc = isInc===true || isInc==='true';
+  const name=prompt(isInc?'שם סוג ההכנסה החדש:':'שם הקטגוריה החדשה:');
+  if(!name||!name.trim())return;
+  const id=isInc?createIncomeCategory(name.trim(), guessIcon(name)):createCategory(name.trim(), guessIcon(name));
+  chooseTxCategory(id);
 }
 function promptSupplier(){
   const t=transactions.find(x=>x.id===txEditId);
@@ -2371,7 +2388,9 @@ function applyEdit(scope){
   }
   saveTx(); // also syncs to Firestore
   closeTxScope(); closeTxEdit();
-  renderReconcile();
+  if(document.getElementById('screen-reconcile')?.classList.contains('active')) renderReconcile();
+  if(document.getElementById('screen-reports')?.classList.contains('active')) renderReports();
+  if(document.getElementById('cat-modal')?.classList.contains('open') && catModalKey) openCatModal(catModalKey);
   showToast('✅ השינוי נשמר');
 }
 
@@ -2379,6 +2398,14 @@ function applyEdit(scope){
 function createCategory(name, icon, color){
   const id='cust_'+Date.now();
   customCategories[id]={name,icon:icon||'🏷️',color:color||AUTO_PALETTE[Object.keys(customCategories).length%AUTO_PALETTE.length],keywords:[name.toLowerCase()],auto:false};
+  saveTx();
+  return id;
+}
+
+// Create a brand-new custom INCOME type
+function createIncomeCategory(name, icon, color){
+  const id='inc_cust_'+Date.now();
+  customIncomeCats[id]={name,icon:icon||'💰',color:color||AUTO_PALETTE[Object.keys(customIncomeCats).length%AUTO_PALETTE.length]};
   saveTx();
   return id;
 }
@@ -2473,7 +2500,7 @@ let reportRange={from:'2026-01',to:'2026-05'};
 
 function runSimulation(){
   if(!confirm('זה יחליף את כל הנתונים הקיימים בנתוני סימולציה. להמשיך?'))return;
-  customCategories={};merchantOverrides={};incomeOverrides={};
+  customCategories={};merchantOverrides={};incomeOverrides={};customIncomeCats={};
   loadSimulation();
   const found=discoverCategories();
   if(found.length){
@@ -2712,62 +2739,46 @@ function renderReports(){
 }
 
 // ── Category drill-down ──
+let catModalKey=null;
 function openCatModal(catKey){
+  catModalKey=catKey;
   const isInc = isIncomeCat(catKey) || reportView==='income';
   const meta=getCatMeta(catKey);
   const sideFilter = isInc ? (t=>t.amount>0) : (t=>t.amount<0);
-  const tx=getReportTx().filter(t=>sideFilter(t)&&(t.category||(isInc?'inc_other':'other'))===catKey);
+  const tx=getReportTx().filter(t=>sideFilter(t)&&(t.category||(isInc?'inc_other':'other'))===catKey)
+    .sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount));
   const total=tx.reduce((s,t)=>s+Math.abs(t.amount),0);
   const allSide=getReportTx().filter(sideFilter).reduce((s,t)=>s+Math.abs(t.amount),0);
   const pctOfAll=allSide>0?Math.round(total/allSide*100):0;
   const ofLabel=isInc?'מההכנסות':'מההוצאות';
-
-  // group by supplier
-  const supMap={};
-  tx.forEach(t=>{
-    const name=merchantName(t.desc);
-    if(!supMap[name])supMap[name]={amt:0,count:0};
-    supMap[name].amt+=Math.abs(t.amount);supMap[name].count++;
-  });
-  const sup=Object.entries(supMap).sort((a,b)=>b[1].amt-a[1].amt);
-  const top3=sup.slice(0,3);
-  const rest=sup.slice(3);
-  const restAmt=rest.reduce((s,[,d])=>s+d.amt,0);
-  const restCount=rest.reduce((s,[,d])=>s+d.count,0);
 
   document.getElementById('cat-modal-icon').textContent=meta.icon;
   document.getElementById('cat-modal-icon').style.background=meta.color+'22';
   document.getElementById('cat-modal-title').textContent=meta.name;
   document.getElementById('cat-modal-sub').textContent=`${fmtAmount(total)} · ${pctOfAll}% ${ofLabel} · ${tx.length} פעולות`;
 
-  let rows=top3.map(([name,d],i)=>{
-    const pct=total>0?Math.round(d.amt/total*100):0;
-    return `<div class="supplier-row" onclick="openReassign('${encodeURIComponent(name)}','${catKey}',${isInc})">
+  // List individual transactions (row by row) — each opens the per-tx editor (same as the data/Reconcile screen)
+  let rows=tx.map(t=>{
+    const acc=getAllAccounts().find(a=>a.key===t.accountKey);
+    return `<div class="supplier-row" onclick="openTxEdit('${t.id}')">
       <div class="supplier-left">
-        <div class="supplier-rank r${i+1}">${i+1}</div>
-        <div class="supplier-info"><div class="supplier-name">${name} <span style="color:var(--text3);font-size:11px;">✎</span></div><div class="supplier-count">${d.count} פעולות</div></div>
+        <div class="supplier-info">
+          <div class="supplier-name">${t.desc||'פעולה'} <span style="color:var(--text3);font-size:11px;">✎</span></div>
+          <div class="supplier-count">${t.date||''} · 🏷️ ${txSupplier(t)}${acc?' · '+acc.name:''}</div>
+        </div>
       </div>
-      <div style="text-align:left;"><div class="supplier-amt">${fmtAmount(d.amt)}</div><div class="supplier-pct">${pct}%</div></div>
+      <div style="text-align:left;"><div class="supplier-amt" style="color:${isInc?'var(--green)':'var(--red)'}">${fmtAmount(t.amount)}</div></div>
     </div>`;
   }).join('');
 
-  if(rest.length>0){
-    const pct=total>0?Math.round(restAmt/total*100):0;
-    rows+=`<div class="supplier-row">
-      <div class="supplier-left">
-        <div class="supplier-rank other">+${rest.length}</div>
-        <div class="supplier-info"><div class="supplier-name">ספקים שונים</div><div class="supplier-count">${rest.length} ספקים · ${restCount} פעולות</div></div>
-      </div>
-      <div style="text-align:left;"><div class="supplier-amt">${fmtAmount(restAmt)}</div><div class="supplier-pct">${pct}%</div></div>
-    </div>`;
-  }
+  rows+=`<div style="font-size:11px;color:var(--text3);text-align:center;margin-top:8px;">לחץ על פעולה כדי לשנות סיווג / סוג — אפשר להחיל על הפעולה בלבד או על כל הספק</div>`;
 
-  rows+=`<div style="font-size:11px;color:var(--text3);text-align:center;margin-top:8px;">לחץ על ספק כדי לשנות את הקטגוריה שלו</div>`;
-
-  document.getElementById('cat-modal-suppliers').innerHTML=rows||'<div class="empty-state">אין פעולות</div>';
+  const host=document.getElementById('cat-modal-suppliers');
+  host.style.maxHeight='340px'; host.style.overflowY='auto';
+  host.innerHTML=rows||'<div class="empty-state">אין פעולות</div>';
   document.getElementById('cat-modal').classList.add('open');
 }
-function closeCatModal(){document.getElementById('cat-modal').classList.remove('open');}
+function closeCatModal(){document.getElementById('cat-modal').classList.remove('open');catModalKey=null;}
 
 // ── Reassign a merchant / income source to another category ──
 function openReassign(encName, currentCat, isInc){
@@ -2775,7 +2786,7 @@ function openReassign(encName, currentCat, isInc){
   const mn=decodeURIComponent(encName);
   let optList;
   if(isInc){
-    optList=Object.entries(BASE_INCOME_META);
+    optList=Object.entries(incomeCatMeta());
   } else {
     const cats=allCatMeta();
     optList=Object.entries(cats).filter(([id])=>!['salary','transfer'].includes(id)&&!id.startsWith('inc_'));
@@ -2926,7 +2937,7 @@ function resetSetup(){
   if(!confirm('למחוק את כל ההגדרות והנתונים?'))return;
   try{localStorage.removeItem(STORAGE_KEY);localStorage.removeItem(TRANSACTIONS_KEY);}catch(e){}
   state={currentStep:0,selectedBanks:new Set(),bankInstances:{},selectedCards:new Set(),cardInstances:{},startDate:'2026-01',reminder:'biweekly',setupDone:false,cardBankLinks:{},verifiedMonths:{}};
-  transactions=[];uploadedFiles=[];pendingFiles=[];customCategories={};merchantOverrides={};supplierOverrides={};incomeOverrides={};notesArchive=[];
+  transactions=[];uploadedFiles=[];pendingFiles=[];customCategories={};merchantOverrides={};supplierOverrides={};incomeOverrides={};customIncomeCats={};notesArchive=[];
   initOnboarding();showScreen('screen-onboarding');
 }
 
@@ -3023,7 +3034,7 @@ async function saveToCloud(){
         updatedAt: Date.now()
       });
       await setDoc(doc(db,'users',uid,'data','transactions'), {
-        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, notesArchive,
+        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, notesArchive,
         updatedAt: Date.now()
       });
       setSyncStatus('synced');
@@ -3067,6 +3078,7 @@ async function loadFromCloud(uid){
           merchantOverrides = d.merchantOverrides||{};
           supplierOverrides = d.supplierOverrides||{};
           incomeOverrides = d.incomeOverrides||{};
+          customIncomeCats = d.customIncomeCats||{};
           notesArchive = d.notesArchive||[];
           migrateIncomeCategories();
           _origSaveTx();
