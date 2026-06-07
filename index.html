@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.6";
+const APP_VERSION = "2.8";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -862,6 +862,10 @@ button{cursor:pointer;}
     <div id="settings-notes"></div>
   </div>
   <div class="settings-section">
+    <div class="settings-section-label">📄 דפים שהועלו</div>
+    <div id="settings-files"></div>
+  </div>
+  <div class="settings-section">
     <div class="settings-section-label">🏷️ ניהול סעיפים (שמות)</div>
     <div class="settings-row">
       <div id="settings-categories"></div>
@@ -1232,6 +1236,99 @@ function rescanTransfers(){
   saveTx();
   renderReports();
   showToast('🔄 סריקת ההעברות הפנימיות הושלמה');
+}
+
+// ═══════════════════════════
+//  UPLOADED STATEMENTS — overlap guard & deletion
+// ═══════════════════════════
+function fileCoveredMonths(f){
+  if(f.coveredMonths&&f.coveredMonths.length)return f.coveredMonths;
+  const dr=f.dateRange||{};
+  return getMonthsBetween(dr.from||getCurrentYYYYMM(), dr.to||getCurrentYYYYMM());
+}
+// existing uploaded files for an account whose months intersect the new file's months
+function findOverlapConflicts(accountKey, newMonths){
+  const out=[];
+  uploadedFiles.filter(f=>f.accountKey===accountKey).forEach(f=>{
+    const shared=fileCoveredMonths(f).filter(m=>newMonths.includes(m));
+    if(shared.length)out.push({file:f,shared});
+  });
+  return out;
+}
+// ids of all transactions that belong to a given uploaded file
+function txIdsOfFile(fileId){
+  const pre=fileId+'_';
+  return transactions.filter(t=>t.id&&(t.id===fileId||t.id.startsWith(pre))).map(t=>t.id);
+}
+// remove an uploaded file + all its transactions (no confirm/render — callers handle that)
+function deleteUploadedFile(fileId){
+  uploadedFiles=uploadedFiles.filter(x=>x.fileId!==fileId);
+  const removed=new Set(txIdsOfFile(fileId));
+  transactions=transactions.filter(t=>!removed.has(t.id));
+  transferLinks=transferLinks.filter(l=>!removed.has(l.a)&&!removed.has(l.b));
+  detectInternalTransfers();
+  saveTx();
+}
+// settings list → confirm then delete
+function confirmDeleteFile(fileId){
+  const f=uploadedFiles.find(x=>x.fileId===fileId);
+  const label=f?(f.fileName||'הדף'):'הדף';
+  const cnt=txIdsOfFile(fileId).length;
+  if(!confirm(`למחוק את הדף "${label}"?\n${cnt} פעולות יוסרו לצמיתות.`))return;
+  deleteUploadedFile(fileId);
+  renderSettings();
+  if(document.getElementById('screen-dashboard')?.classList.contains('active'))renderDashboard();
+  showToast('🗑️ הדף והפעולות שלו נמחקו');
+}
+// overlap block → delete the conflicting existing file, then continue the blocked upload
+function resolveOverlapByDelete(pendingId, existingId){
+  deleteUploadedFile(existingId);
+  showToast('🗑️ הדף הקיים נמחק — ממשיך בהעלאה');
+  confirmUpload(pendingId);
+}
+// list of uploaded statements in Settings (each deletable)
+function renderUploadedFiles(){
+  const div=document.getElementById('settings-files');
+  if(!div)return;
+  if(!uploadedFiles.length){div.innerHTML='<div class="empty-state" style="padding:12px">לא הועלו דפים עדיין</div>';return;}
+  const accName=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?(a.icon+' '+a.name):'חשבון לא ידוע';};
+  const sorted=[...uploadedFiles].sort((a,b)=>(a.accountKey||'').localeCompare(b.accountKey||'')||((a.dateRange&&a.dateRange.from||'').localeCompare(b.dateRange&&b.dateRange.from||'')));
+  div.innerHTML=sorted.map(f=>{
+    const months=fileCoveredMonths(f);
+    const label=months.length?(months.length>1?months[0]+' – '+months[months.length-1]:months[0]):((f.dateRange&&f.dateRange.from)||'');
+    const cnt=txIdsOfFile(f.fileId).length;
+    return `<div class="settings-row">
+      <div class="settings-row-header" style="align-items:flex-start;gap:8px;">
+        <div style="min-width:0;flex:1;">
+          <div class="settings-row-name" style="font-size:13px;">${escHtml(accName(f.accountKey))}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">🗓️ ${escHtml(label)} · ${cnt} פעולות${f.fileName?' · '+escHtml(f.fileName):''}</div>
+        </div>
+        <button onclick="confirmDeleteFile('${f.fileId}')" style="background:var(--red-dim);border:1px solid var(--red);color:var(--red);font-family:'Heebo';font-size:12px;padding:5px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;">🗑️ מחק</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+// the block shown when an upload's months already exist
+function showOverlapBlock(pf, conflicts){
+  const assignDiv=document.getElementById('assign_'+pf.fileId);
+  if(!assignDiv)return;
+  const accName=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?a.name:'';};
+  const monthsLabel=arr=>arr.length>1?arr[0]+' – '+arr[arr.length-1]:arr[0];
+  const rows=conflicts.map(c=>`
+    <div style="padding:10px;background:var(--surface3);border-right:3px solid var(--amber);border-radius:8px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <div style="min-width:0;font-size:12px;line-height:1.5;">
+        <div style="font-weight:700;">${escHtml(c.file.fileName||'דף קיים')}</div>
+        <div style="color:var(--text3);">חודשים חופפים: ${escHtml(monthsLabel(c.shared))}</div>
+      </div>
+      <button onclick="resolveOverlapByDelete('${pf.fileId}','${c.file.fileId}')" style="background:var(--red-dim);border:1px solid var(--red);color:var(--red);font-family:'Heebo';font-size:12px;padding:6px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;">🗑️ מחק דף זה</button>
+    </div>`).join('');
+  assignDiv.innerHTML=`
+    <div style="padding:12px;background:var(--surface2);border-radius:10px;margin-top:8px;">
+      <div style="font-size:13px;font-weight:700;color:var(--amber);margin-bottom:6px;">🚫 כל הפעולות בקובץ כבר קיימות בחשבון ${escHtml(accName(pf.assignedKey))}</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6;">אין תאריכים חדשים לקליטה. אם ברצונך לייבא מחדש או להחליף את הנתונים — מחק תחילה את הדף/ים הקיים/ים, וההעלאה תימשך אוטומטית.</div>
+      ${rows}
+      <button class="btn-confirm-upload" style="width:100%;background:var(--surface2);color:var(--text2);border:1px solid var(--border2);margin-top:4px;" onclick="removePendingFile('${pf.fileId}')">ביטול ההעלאה</button>
+    </div>`;
 }
 
 // ═══════════════════════════
@@ -2053,6 +2150,25 @@ async function confirmUpload(fileId){
   if(!pf||!pf.assignedKey){showToast('⚠️ בחר חשבון תחילה','error');return;}
   const result=pf.aiResult||{};
 
+  // ── Date range + de-duplicate against transactions that already exist for this account ──
+  const dr=result.estimatedDateRange||{from:getCurrentYYYYMM(),to:getCurrentYYYYMM()};
+  const fileTx = result.allTransactions?.length ? result.allTransactions : (result.sampleTransactions||[]);
+  const _norm=s=>(s||'פעולה').toString().replace(/\s+/g,' ').trim();
+  const _cents=a=>Math.round((a||0)*100);
+  const _sigFile=t=>(t.date||dr.from+'-01')+'|'+_cents(t.amount)+'|'+_norm(t.desc);
+  const _sigExist=t=>(t.date||'')+'|'+_cents(t.amount)+'|'+_norm(t.desc);
+  const existCount={};
+  transactions.filter(t=>t.accountKey===pf.assignedKey).forEach(t=>{const s=_sigExist(t);existCount[s]=(existCount[s]||0)+1;});
+  const toAdd=[]; let skipped=0;
+  fileTx.forEach(t=>{const s=_sigFile(t); if(existCount[s]>0){existCount[s]--;skipped++;} else toAdd.push(t);});
+
+  // ── Fully-duplicate file: nothing new → offer delete-to-replace (no partial ingest possible) ──
+  if(fileTx.length>0 && toAdd.length===0){
+    const fileMonths=(result.coveredMonths&&result.coveredMonths.length)?result.coveredMonths:getMonthsBetween(dr.from,dr.to);
+    showOverlapBlock(pf, findOverlapConflicts(pf.assignedKey, fileMonths));
+    return;
+  }
+
   // ── Run validations (unless already acknowledged) ──
   if(!pf.validationsAcked){
     const issues=runValidations(result, pf.assignedKey);
@@ -2062,13 +2178,14 @@ async function confirmUpload(fileId){
     }
   }
 
-  const dr=result.estimatedDateRange||{from:getCurrentYYYYMM(),to:getCurrentYYYYMM()};
-  let covered=result.coveredMonths&&result.coveredMonths.length?result.coveredMonths:getMonthsBetween(dr.from,dr.to);
+  // Covered months: when duplicates were skipped, record only the months actually added; otherwise keep declared coverage
+  let covered = skipped>0
+    ? [...new Set(toAdd.map(t=>(t.date||dr.from+'-01').slice(0,7)))].sort()
+    : (result.coveredMonths&&result.coveredMonths.length?result.coveredMonths:getMonthsBetween(dr.from,dr.to));
 
-  uploadedFiles.push({fileId:pf.fileId,accountKey:pf.assignedKey,dateRange:dr,coveredMonths:covered,txCount:(result.summary?.txCount||0),fileName:pf.file.name,summary:result.summary||{}});
+  uploadedFiles.push({fileId:pf.fileId,accountKey:pf.assignedKey,dateRange:dr,coveredMonths:covered,txCount:toAdd.length,fileName:pf.file.name,summary:result.summary||{}});
 
-  const txList = result.allTransactions?.length ? result.allTransactions : (result.sampleTransactions||[]);
-  txList.forEach((t,i)=>{
+  toAdd.forEach((t,i)=>{
     transactions.push({id:pf.fileId+'_'+i,accountKey:pf.assignedKey,date:t.date||dr.from+'-01',desc:t.desc||'פעולה',amount:t.amount||0,balance:t.balance||null,category:((t.amount||0)>0?((t.incomeType&&BASE_INCOME_META[t.incomeType])?t.incomeType:categorize(t.desc||'',t.amount||0)):categorize(t.desc||'',t.amount||0)),source:pf.file.name});
   });
 
@@ -2086,7 +2203,10 @@ async function confirmUpload(fileId){
   pendingFiles=pendingFiles.filter(f=>f.fileId!==fileId);
   document.getElementById('fitem_'+fileId)?.remove();
   const mCount=covered.length;
-  showToast(`✅ נשמר! ${mCount} חודשים נקלטו${found.length?` · ${found.length} קטגוריות חדשות`:''}`);
+  const baseMsg = skipped>0
+    ? `✅ נקלטו ${toAdd.length} פעולות חדשות · ${skipped} כפילויות דולגו`
+    : `✅ נשמר! ${mCount} חודשים נקלטו`;
+  showToast(`${baseMsg}${found.length?` · ${found.length} קטגוריות חדשות`:''}`);
   if(pendingFiles.length===0) setTimeout(()=>showDashboard(),1300);
 }
 
@@ -3322,6 +3442,7 @@ function renderSettings(){
   }).join('');}
 
   renderNotesArchive();
+  renderUploadedFiles();
   renderCategoriesManager();
   const sv=document.getElementById('settings-version'); if(sv) sv.textContent='עוזר פיננסי אישי · גרסה '+APP_VERSION;
 }
