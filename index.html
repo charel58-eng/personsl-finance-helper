@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.3";
+const APP_VERSION = "2.4";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -380,6 +380,20 @@ button{cursor:pointer;}
 .picker-empty{font-size:13px;color:var(--text3);text-align:center;padding:18px 0;}
 .picker-new{width:100%;margin-top:10px;padding:12px;background:var(--blue-dim);border:1.5px solid var(--blue-glow);border-radius:12px;color:var(--blue);font-size:14px;font-weight:700;cursor:pointer;text-align:center;}
 .picker-new:active{transform:scale(.985);}
+/* category rename modal sits above everything */
+#catrename-modal{z-index:260;}
+/* small inline rename pencil on category chips in the sort/reassign grids */
+.reassign-opt{position:relative;}
+.cat-edit-pencil{margin-inline-start:auto;width:24px;height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;background:var(--surface3);color:var(--text2);flex-shrink:0;cursor:pointer;transition:all .12s;}
+.cat-edit-pencil:hover{background:var(--blue-dim);color:var(--blue);}
+.cat-edit-pencil:active{transform:scale(.9);}
+/* settings category-manager rows */
+.cat-mgr-row{display:flex;align-items:center;gap:9px;padding:9px 11px;background:var(--surface2);border-radius:10px;margin-bottom:6px;}
+.cat-mgr-icon{font-size:16px;width:22px;text-align:center;flex-shrink:0;}
+.cat-mgr-name{flex:1;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cat-mgr-tag{font-size:9px;font-weight:800;color:var(--text3);background:var(--surface3);border-radius:5px;padding:2px 6px;flex-shrink:0;}
+.cat-mgr-edit{font-size:12px;color:var(--blue);font-weight:700;cursor:pointer;flex-shrink:0;}
+.cat-mgr-sublabel{font-size:11px;color:var(--text3);font-weight:700;margin:10px 2px 6px;}
 
 /* ── REPORTS ── */
 #screen-reports{padding-bottom:calc(80px + env(safe-area-inset-bottom));}
@@ -600,6 +614,13 @@ button{cursor:pointer;}
 <div class="modal-overlay" id="picker-modal" onclick="if(event.target===this)closePicker()">
   <div class="modal-box">
     <div id="picker-body"></div>
+  </div>
+</div>
+
+<!-- Category rename modal (rename any expense/income section) -->
+<div class="modal-overlay" id="catrename-modal" onclick="if(event.target===this)closeCatRename()">
+  <div class="modal-box">
+    <div id="catrename-body"></div>
   </div>
 </div>
 
@@ -837,6 +858,12 @@ button{cursor:pointer;}
     <div id="settings-notes"></div>
   </div>
   <div class="settings-section">
+    <div class="settings-section-label">🏷️ ניהול סעיפים (שמות)</div>
+    <div class="settings-row">
+      <div id="settings-categories"></div>
+    </div>
+  </div>
+  <div class="settings-section">
     <div class="settings-section-label">כללי</div>
     <div class="settings-row">
       <div class="settings-row-header">
@@ -1019,6 +1046,7 @@ let supplierOverrides = {};
 let incomeOverrides = {};
 // customIncomeCats: {inc_cust_*: {name,icon,color}} — user-created income types
 let customIncomeCats = {};
+let catMetaOverrides = {};   // {catId:{name}} — display-name overrides for ANY category (base or custom)
 
 let currentMonth = new Date();
 let alertsExpanded = false;
@@ -1057,7 +1085,7 @@ function loadState() {
     return true;
   }catch(e){return false;}
 }
-function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,customIncomeCats,notesArchive}));}catch(e){}}
+function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,customIncomeCats,catMetaOverrides,notesArchive}));}catch(e){}}
 function loadTx(){
   try{
     const raw=localStorage.getItem(TRANSACTIONS_KEY);
@@ -1070,6 +1098,7 @@ function loadTx(){
     supplierOverrides=d.supplierOverrides||{};
     incomeOverrides=d.incomeOverrides||{};
     customIncomeCats=d.customIncomeCats||{};
+    catMetaOverrides=d.catMetaOverrides||{};
     notesArchive=d.notesArchive||[];
     migrateIncomeCategories();
   }catch(e){}
@@ -2084,15 +2113,23 @@ const BASE_CAT_META={
   other:{name:'אחר',icon:'💰',color:'#CBD5E1'},
 };
 // merged view of base + custom categories
+// applies a display-name override (catMetaOverrides) on top of any meta, without mutating the source
+function applyCatOverride(id,meta){
+  const o=catMetaOverrides[id];
+  return (o&&o.name)?Object.assign({},meta,{name:o.name}):meta;
+}
 function getCatMeta(id){
-  return customCategories[id]||customIncomeCats[id]||BASE_CAT_META[id]||BASE_INCOME_META[id]||BASE_CAT_META.other;
+  const base=customCategories[id]||customIncomeCats[id]||BASE_CAT_META[id]||BASE_INCOME_META[id]||BASE_CAT_META.other;
+  return applyCatOverride(id,base);
 }
 function allCatMeta(){
-  return Object.assign({},BASE_CAT_META,customCategories);
+  const m=Object.assign({},BASE_CAT_META,customCategories);
+  const out={}; for(const k in m) out[k]=applyCatOverride(k,m[k]); return out;
 }
 // merged view of base + custom INCOME categories
 function incomeCatMeta(){
-  return Object.assign({},BASE_INCOME_META,customIncomeCats);
+  const m=Object.assign({},BASE_INCOME_META,customIncomeCats);
+  const out={}; for(const k in m) out[k]=applyCatOverride(k,m[k]); return out;
 }
 
 // ── INCOME categories (parallel namespace, all ids prefixed inc_) ──
@@ -2304,7 +2341,8 @@ function openTxEdit(id){
   const sup=txSupplier(t);
   const optList=isInc?Object.entries(incomeCatMeta()):Object.entries(allCatMeta()).filter(([cid])=>!['salary','transfer'].includes(cid)&&!cid.startsWith('inc_'));
   const grid=optList.map(([cid,m])=>`<div class="reassign-opt ${cid===t.category?'current':''}" onclick="chooseTxCategory('${cid}')">
-      <span style="font-size:18px;">${m.icon}</span><span>${m.name}</span></div>`).join('');
+      <span style="font-size:18px;">${m.icon}</span><span>${m.name}</span>
+      <span class="cat-edit-pencil" onclick="editCatFromChip(event,'${cid}',${isInc})" title="שנה שם">✏️</span></div>`).join('');
   const expBtn=`<button onclick="flipTxKind(false)" style="flex:1;padding:11px;border-radius:11px;border:2px solid ${!isInc?'var(--red)':'var(--border)'};background:${!isInc?'var(--red-dim)':'var(--surface2)'};color:${!isInc?'var(--red)':'var(--text2)'};font-weight:800;font-size:14px;">📉 הוצאה</button>`;
   const incBtn=`<button onclick="flipTxKind(true)" style="flex:1;padding:11px;border-radius:11px;border:2px solid ${isInc?'var(--green)':'var(--border)'};background:${isInc?'var(--green-dim)':'var(--surface2)'};color:${isInc?'var(--green)':'var(--text2)'};font-weight:800;font-size:14px;">📈 הכנסה</button>`;
   document.getElementById('txedit-body').innerHTML=`
@@ -2451,6 +2489,76 @@ function supplierList(){
   transactions.forEach(t=>{const s=txSupplier(t); m.set(s,(m.get(s)||0)+1);});
   return [...m.entries()].map(([value,count])=>({value,count}))
     .sort((a,b)=>b.count-a.count||a.value.localeCompare(b.value,'he'));
+}
+
+// ═══════════════════════════
+//  CATEGORY RENAME — rename any expense/income section (base or custom).
+//  Base categories use a display-name override (catMetaOverrides); custom ones too.
+//  The category id never changes, so all transactions keep pointing at it.
+// ═══════════════════════════
+let catRenameId=null, catRenameIsInc=false, reassignCtx=null;
+function isCustomCat(id){return !!(customCategories[id]||customIncomeCats[id]);}
+function openCatRename(id,isInc){
+  catRenameId=id; catRenameIsInc=(isInc===true||isInc==='true');
+  const meta=getCatMeta(id);
+  const custom=isCustomCat(id);
+  document.getElementById('catrename-body').innerHTML=`
+    <div class="cat-modal-header">
+      <div class="cat-modal-icon">${meta.icon}</div>
+      <div><div class="cat-modal-title">שינוי שם סעיף</div>
+        <div class="cat-modal-sub">${catRenameIsInc?'סוג הכנסה':'קטגוריית הוצאה'} · ${custom?'מותאם אישית':'מובנה'}</div></div>
+    </div>
+    <input id="catrename-input" class="picker-search" value="${escHtml(meta.name)}" placeholder="שם הסעיף…" autocomplete="off">
+    <div class="modal-btns" style="margin-top:12px;">
+      <button class="modal-cancel" onclick="closeCatRename()">ביטול</button>
+      <button class="modal-ok" onclick="saveCatRename()">שמור</button>
+    </div>`;
+  document.getElementById('catrename-modal').classList.add('open');
+  const inp=document.getElementById('catrename-input');
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();saveCatRename();} else if(e.key==='Escape')closeCatRename(); });
+  setTimeout(()=>{inp.focus();inp.select();},60);
+}
+function closeCatRename(){document.getElementById('catrename-modal').classList.remove('open');catRenameId=null;}
+function saveCatRename(){
+  if(!catRenameId){closeCatRename();return;}
+  const id=catRenameId;
+  const v=document.getElementById('catrename-input').value.trim();
+  if(!v){closeCatRename();return;}
+  // original (un-overridden) name, to drop the override if the user restores the default
+  const orig=(customCategories[id]||customIncomeCats[id]||BASE_CAT_META[id]||BASE_INCOME_META[id]||{}).name;
+  if(v===orig) delete catMetaOverrides[id];
+  else catMetaOverrides[id]={name:v};
+  saveTx();
+  closeCatRename();
+  // refresh any open surface so the new name shows immediately
+  if(document.getElementById('cat-modal')?.classList.contains('open') && catModalKey) openCatModal(catModalKey);
+  if(reassignCtx && document.getElementById('reassign-modal')?.classList.contains('open')) openReassign(reassignCtx.encName,reassignCtx.currentCat,reassignCtx.isInc);
+  if(document.getElementById('txedit-modal')?.classList.contains('open') && txEditId) openTxEdit(txEditId);
+  if(document.getElementById('screen-reports')?.classList.contains('active')) renderReports();
+  if(document.getElementById('screen-reconcile')?.classList.contains('active')) renderReconcile();
+  if(document.getElementById('screen-settings')?.classList.contains('active')) renderSettings();
+  showToast('✅ השם עודכן');
+}
+// stopPropagation wrapper for the inline pencil on grid chips (so tapping ✏️ renames, not assigns)
+function editCatFromChip(ev,id,isInc){ ev.stopPropagation(); openCatRename(id,isInc); }
+
+// Render the "ניהול סעיפים" manager in Settings
+function renderCategoriesManager(){
+  const host=document.getElementById('settings-categories');
+  if(!host)return;
+  const expEntries=Object.entries(allCatMeta()).filter(([id])=>!['salary','transfer'].includes(id)&&!id.startsWith('inc_'));
+  const incEntries=Object.entries(incomeCatMeta());
+  const row=(id,m,isInc)=>`<div class="cat-mgr-row">
+      <span class="cat-mgr-icon">${m.icon}</span>
+      <span class="cat-mgr-name">${escHtml(m.name)}</span>
+      ${isCustomCat(id)?'<span class="cat-mgr-tag">מותאם</span>':''}
+      <span class="cat-mgr-edit" onclick="openCatRename('${id}',${isInc})">✏️ שנה שם</span>
+    </div>`;
+  host.innerHTML=`
+    <div class="cat-mgr-sublabel">📉 הוצאות</div>
+    ${expEntries.map(([id,m])=>row(id,m,false)).join('')}
+    <div class="cat-mgr-sublabel">📈 הכנסות</div>
+    ${incEntries.map(([id,m])=>row(id,m,true)).join('')}`;
 }
 
 // Create a new category (expense) or income type that isn't in the list, then assign it
@@ -2942,6 +3050,7 @@ function closeCatModal(){document.getElementById('cat-modal').classList.remove('
 function openReassign(encName, currentCat, isInc){
   isInc = isInc===true || isInc==='true';
   const mn=decodeURIComponent(encName);
+  reassignCtx={encName,currentCat,isInc};
   let optList;
   if(isInc){
     optList=Object.entries(incomeCatMeta());
@@ -2954,7 +3063,8 @@ function openReassign(encName, currentCat, isInc){
     <div class="reassign-grid">`;
   optList.forEach(([id,m])=>{
     html+=`<div class="reassign-opt ${id===currentCat?'current':''}" onclick="doReassign('${encodeURIComponent(mn)}','${id}',${isInc})">
-      <span style="font-size:18px;">${m.icon}</span><span>${m.name}</span></div>`;
+      <span style="font-size:18px;">${m.icon}</span><span>${m.name}</span>
+      <span class="cat-edit-pencil" onclick="editCatFromChip(event,'${id}',${isInc})" title="שנה שם">✏️</span></div>`;
   });
   html+=`</div>`;
   if(!isInc){
@@ -3041,6 +3151,7 @@ function renderSettings(){
   }).join('');}
 
   renderNotesArchive();
+  renderCategoriesManager();
   const sv=document.getElementById('settings-version'); if(sv) sv.textContent='עוזר פיננסי אישי · גרסה '+APP_VERSION;
 }
 
@@ -3201,7 +3312,7 @@ async function saveToCloud(){
         updatedAt: Date.now()
       });
       await setDoc(doc(db,'users',uid,'data','transactions'), {
-        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, notesArchive,
+        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, catMetaOverrides, notesArchive,
         updatedAt: Date.now()
       });
       setSyncStatus('synced');
@@ -3246,6 +3357,7 @@ async function loadFromCloud(uid){
           supplierOverrides = d.supplierOverrides||{};
           incomeOverrides = d.incomeOverrides||{};
           customIncomeCats = d.customIncomeCats||{};
+          catMetaOverrides = d.catMetaOverrides||{};
           notesArchive = d.notesArchive||[];
           migrateIncomeCategories();
           _origSaveTx();
