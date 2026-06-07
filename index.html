@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.2";
+const APP_VERSION = "2.3";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -360,6 +360,26 @@ button{cursor:pointer;}
 .modal-btns{display:flex;gap:10px;}
 .modal-cancel{flex:1;padding:13px;background:var(--surface3);border:1.5px solid var(--border);border-radius:12px;color:var(--text2);font-size:15px;font-weight:700;}
 .modal-ok{flex:1;padding:13px;background:var(--green);border:none;border-radius:12px;color:#07080F;font-size:15px;font-weight:800;}
+/* ── elegant picker (replaces white prompt()) ── */
+#picker-modal{z-index:240;}
+.picker-search{width:100%;background:var(--surface2);border:1.5px solid var(--border2);border-radius:12px;padding:13px 14px;font-size:15px;color:var(--text);direction:rtl;text-align:right;margin-bottom:10px;outline:none;transition:border-color .15s;}
+.picker-search:focus{border-color:var(--green);}
+.picker-search::placeholder{color:var(--text3);}
+.picker-dupnote{font-size:12px;line-height:1.5;color:#FACC15;background:rgba(250,204,21,0.08);border:1px solid rgba(250,204,21,0.25);border-radius:10px;padding:9px 12px;margin-bottom:10px;}
+.picker-list{display:flex;flex-direction:column;gap:7px;max-height:46vh;overflow-y:auto;margin:0 -2px;padding:0 2px;}
+.picker-opt{display:flex;align-items:center;gap:11px;padding:11px 13px;background:var(--surface2);border:1.5px solid var(--border);border-radius:12px;cursor:pointer;transition:all .12s;}
+.picker-opt:active{transform:scale(.985);}
+.picker-opt:hover{border-color:var(--border2);background:var(--surface3);}
+.picker-opt.match{border-color:var(--green);background:var(--green-dim);}
+.picker-opt-icon{font-size:19px;width:24px;text-align:center;flex-shrink:0;}
+.picker-opt-info{min-width:0;flex:1;}
+.picker-opt-label{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.picker-opt-sub{font-size:11px;color:var(--text3);margin-top:2px;}
+.picker-opt-badge{font-size:10px;font-weight:800;color:var(--green);background:var(--green-glow);border-radius:6px;padding:3px 7px;flex-shrink:0;}
+.picker-opt mark.pk-hl{background:var(--green-glow);color:var(--green);border-radius:3px;padding:0 1px;}
+.picker-empty{font-size:13px;color:var(--text3);text-align:center;padding:18px 0;}
+.picker-new{width:100%;margin-top:10px;padding:12px;background:var(--blue-dim);border:1.5px solid var(--blue-glow);border-radius:12px;color:var(--blue);font-size:14px;font-weight:700;cursor:pointer;text-align:center;}
+.picker-new:active{transform:scale(.985);}
 
 /* ── REPORTS ── */
 #screen-reports{padding-bottom:calc(80px + env(safe-area-inset-bottom));}
@@ -573,6 +593,13 @@ button{cursor:pointer;}
 <div class="modal-overlay" id="txscope-modal" onclick="if(event.target===this)closeTxScope()">
   <div class="modal-box">
     <div id="txscope-body"></div>
+  </div>
+</div>
+
+<!-- Elegant picker modal (supplier / category / income type) — replaces native prompt() -->
+<div class="modal-overlay" id="picker-modal" onclick="if(event.target===this)closePicker()">
+  <div class="modal-box">
+    <div id="picker-body"></div>
   </div>
 </div>
 
@@ -2318,24 +2345,155 @@ function chooseTxCategory(catId){
   pendingEdit={type:'category', value:catId};
   openScopeChoice();
 }
+// ═══════════════════════════
+//  ELEGANT PICKER — reusable in-app modal that replaces native prompt().
+//  Lets the user pick an existing item (to avoid duplicates) or type a new
+//  name, with live "similar items" filtering as you type.
+// ═══════════════════════════
+let pickerState=null;
+function escHtml(s){return (s||'').toString().replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function pickerNorm(s){return (s||'').toString().trim().toLowerCase();}
+function pickerHighlight(label,q){
+  if(!q)return escHtml(label);
+  const lo=label.toLowerCase(); const i=lo.indexOf(q);
+  if(i<0)return escHtml(label);
+  return escHtml(label.slice(0,i))+'<mark class="pk-hl">'+escHtml(label.slice(i,i+q.length))+'</mark>'+escHtml(label.slice(i+q.length));
+}
+// opts: {icon,title,sub,placeholder,current,existing:[{value,label,sub,icon,count}],allowNew,newLabel,onPick(value,isExisting,item)}
+function openPicker(opts){
+  pickerState={opts};
+  document.getElementById('picker-body').innerHTML=`
+    <div class="cat-modal-header">
+      <div class="cat-modal-icon">${opts.icon||'🏷️'}</div>
+      <div><div class="cat-modal-title">${escHtml(opts.title||'בחירה')}</div>
+        <div class="cat-modal-sub">${escHtml(opts.sub||'בחר מהקיימים או הקלד שם חדש')}</div></div>
+    </div>
+    <input id="picker-search" class="picker-search" placeholder="${escHtml(opts.placeholder||'חיפוש או שם חדש…')}" value="${escHtml(opts.current||'')}" autocomplete="off">
+    <div id="picker-dupnote" class="picker-dupnote" style="display:none;"></div>
+    <div id="picker-list" class="picker-list"></div>
+    <div id="picker-newwrap"></div>
+    <button class="modal-cancel" style="width:100%;margin-top:10px;" onclick="closePicker()">ביטול</button>`;
+  document.getElementById('picker-modal').classList.add('open');
+  const inp=document.getElementById('picker-search');
+  inp.addEventListener('input',renderPickerList);
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();pickerEnter();}
+    else if(e.key==='Escape'){closePicker();}
+  });
+  renderPickerList();
+  setTimeout(()=>{inp.focus(); if(opts.current)inp.select();},60);
+}
+function closePicker(){document.getElementById('picker-modal').classList.remove('open');pickerState=null;}
+function renderPickerList(){
+  if(!pickerState)return;
+  const {opts}=pickerState;
+  const raw=document.getElementById('picker-search').value;
+  const q=pickerNorm(raw); const typed=raw.trim();
+  const items=opts.existing||[];
+  const scored=items.map(it=>{
+    const lab=pickerNorm(it.label); let rank=-1;
+    if(q==='')rank=0; else if(lab===q)rank=3; else if(lab.startsWith(q))rank=2; else if(lab.includes(q))rank=1;
+    return {it,rank};
+  }).filter(x=>x.rank>=0)
+    .sort((a,b)=> b.rank-a.rank || ((b.it.count||0)-(a.it.count||0)) || (a.it.label||'').localeCompare(b.it.label||'','he'));
+  const exact=scored.find(x=>x.rank===3);
+  const listEl=document.getElementById('picker-list');
+  if(scored.length===0){
+    listEl.innerHTML=`<div class="picker-empty">${q?'אין התאמות בקיימים':'אין פריטים קיימים'}</div>`;
+  } else {
+    listEl.innerHTML=scored.slice(0,50).map(x=>{
+      const idx=items.indexOf(x.it);
+      const sub=x.it.sub?`<div class="picker-opt-sub">${escHtml(x.it.sub)}</div>`:'';
+      return `<div class="picker-opt${x.rank===3?' match':''}" onclick="pickerPick(${idx})">
+        <span class="picker-opt-icon">${x.it.icon||'🏷️'}</span>
+        <div class="picker-opt-info"><div class="picker-opt-label">${q?pickerHighlight(x.it.label,q):escHtml(x.it.label)}</div>${sub}</div>
+        ${x.rank===3?'<span class="picker-opt-badge">קיים</span>':''}
+      </div>`;
+    }).join('');
+  }
+  const note=document.getElementById('picker-dupnote');
+  const newWrap=document.getElementById('picker-newwrap');
+  if(exact){
+    note.style.display='block';
+    note.innerHTML=`⚠️ «${escHtml(exact.it.label)}» כבר קיים — בחירה בו תאחד לשם הקיים במקום ליצור כפילות.`;
+    newWrap.innerHTML='';
+  } else {
+    note.style.display='none';
+    if(opts.allowNew && typed && typed!==(opts.current||'')){
+      newWrap.innerHTML=`<button class="picker-new" onclick="pickerCreateNew()">➕ ${escHtml(opts.newLabel||'צור חדש')}: «${escHtml(typed)}»</button>`;
+    } else newWrap.innerHTML='';
+  }
+}
+function pickerPick(idx){
+  if(!pickerState)return;
+  const {opts}=pickerState; const it=(opts.existing||[])[idx]; if(!it)return;
+  const cb=opts.onPick; closePicker(); cb(it.value,true,it);
+}
+function pickerCreateNew(){
+  if(!pickerState)return;
+  const {opts}=pickerState; const v=document.getElementById('picker-search').value.trim(); if(!v)return;
+  const cb=opts.onPick; closePicker(); cb(v,false,null);
+}
+function pickerEnter(){
+  if(!pickerState)return;
+  const {opts}=pickerState;
+  const q=pickerNorm(document.getElementById('picker-search').value);
+  const typed=document.getElementById('picker-search').value.trim(); if(!typed)return;
+  const exactIdx=(opts.existing||[]).findIndex(it=>pickerNorm(it.label)===q);
+  if(exactIdx>=0){pickerPick(exactIdx);return;}
+  if(opts.allowNew){pickerCreateNew();return;}
+  const matches=(opts.existing||[]).filter(it=>pickerNorm(it.label).includes(q));
+  if(matches.length===1)pickerPick((opts.existing||[]).indexOf(matches[0]));
+}
+// distinct suppliers (across income + expense) with transaction counts, for the picker
+function supplierList(){
+  const m=new Map();
+  transactions.forEach(t=>{const s=txSupplier(t); m.set(s,(m.get(s)||0)+1);});
+  return [...m.entries()].map(([value,count])=>({value,count}))
+    .sort((a,b)=>b.count-a.count||a.value.localeCompare(b.value,'he'));
+}
+
 // Create a new category (expense) or income type that isn't in the list, then assign it
 function promptNewCatForTx(isInc){
   isInc = isInc===true || isInc==='true';
-  const name=prompt(isInc?'שם סוג ההכנסה החדש:':'שם הקטגוריה החדשה:');
-  if(!name||!name.trim())return;
-  const id=isInc?createIncomeCategory(name.trim(), guessIcon(name)):createCategory(name.trim(), guessIcon(name));
-  chooseTxCategory(id);
+  const t=transactions.find(x=>x.id===txEditId);
+  const cur=t?t.category:null;
+  const metaEntries=isInc
+    ? Object.entries(incomeCatMeta())
+    : Object.entries(allCatMeta()).filter(([cid])=>!['salary','transfer'].includes(cid)&&!cid.startsWith('inc_'));
+  const existing=metaEntries.map(([cid,m])=>({value:cid,label:m.name,icon:m.icon,sub:cid===cur?'הקטגוריה הנוכחית':''}));
+  openPicker({
+    icon:isInc?'💰':'🏷️',
+    title:isInc?'בחר או צור סוג הכנסה':'בחר או צור קטגוריה',
+    sub:'בחר מהקיימים כדי למנוע כפילות, או הקלד שם חדש',
+    placeholder:isInc?'שם סוג הכנסה…':'שם קטגוריה…',
+    existing, allowNew:true, newLabel:isInc?'צור סוג הכנסה':'צור קטגוריה',
+    onPick:(value,isExisting)=>{
+      if(isExisting){ chooseTxCategory(value); return; }
+      const name=value.trim();
+      const id=isInc?createIncomeCategory(name, guessIcon(name)):createCategory(name, guessIcon(name));
+      chooseTxCategory(id);
+    }
+  });
 }
 function promptSupplier(){
   const t=transactions.find(x=>x.id===txEditId);
   if(!t)return;
   const current=txSupplier(t);
-  const others=allSuppliers().filter(s=>s!==current);
-  const hint=others.length?`\n\nספקים קיימים (כתוב שם זהה כדי לאחד):\n${others.slice(0,15).join(' · ')}`:'';
-  const name=prompt('שם הספק (שנה שם, או כתוב שם של ספק קיים כדי לאחד):'+hint, current);
-  if(!name||name.trim()===''||name.trim()===current)return;
-  pendingEdit={type:'supplier', value:name.trim()};
-  openScopeChoice();
+  const existing=supplierList().filter(s=>s.value!==current).map(s=>({
+    value:s.value, label:s.value, icon:'🏷️', count:s.count, sub:s.count+' פעולות'
+  }));
+  openPicker({
+    icon:'🏷️', title:'שינוי / איחוד ספק',
+    sub:'בחר ספק קיים כדי לאחד, או הקלד שם חדש',
+    placeholder:'שם ספק…', current, existing, allowNew:true, newLabel:'שנה לשם',
+    onPick:(value)=>{
+      const v=(value||'').trim();
+      if(!v||v===current)return;
+      pendingEdit={type:'supplier', value:v};
+      openScopeChoice();
+    }
+  });
 }
 
 // ── scope choice (this one / all of supplier) ──
@@ -2816,10 +2974,19 @@ function doReassign(encName, catId, isInc){
   showToast(isInc?'✅ מקור ההכנסה שויך מחדש':'✅ הספק שויך מחדש');
 }
 function promptNewCategory(encName){
-  const name=prompt('שם הקטגוריה החדשה:');
-  if(!name)return;
-  const id=createCategory(name, guessIcon(name));
-  doReassign(encName, id);
+  const existing=Object.entries(allCatMeta())
+    .filter(([cid])=>!['salary','transfer'].includes(cid)&&!cid.startsWith('inc_'))
+    .map(([cid,m])=>({value:cid,label:m.name,icon:m.icon}));
+  openPicker({
+    icon:'🏷️', title:'בחר או צור קטגוריה',
+    sub:'בחר מהקיימים כדי למנוע כפילות, או הקלד שם חדש',
+    placeholder:'שם קטגוריה…', existing, allowNew:true, newLabel:'צור קטגוריה',
+    onPick:(value,isExisting)=>{
+      if(isExisting){ doReassign(encName, value); return; }
+      const id=createCategory(value.trim(), guessIcon(value));
+      doReassign(encName, id);
+    }
+  });
 }
 
 
