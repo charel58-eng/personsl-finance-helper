@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.10";
+const APP_VERSION = "2.11";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -1819,9 +1819,22 @@ async function analyzeFile(pf, ext){
   setTimeout(()=>setStep(2), 1400);
   setTimeout(()=>setStep(3), 2200);
 
-  // ── AI Analysis via Anthropic API ──
+  // ── AI Analysis via Anthropic API (with auto-retry on transient errors) ──
   try {
-    const result = await analyzeWithAI(pf, ext, fileContent);
+    let result, lastErr=null;
+    for(let attempt=0; attempt<3; attempt++){
+      try { result = await analyzeWithAI(pf, ext, fileContent); lastErr=null; break; }
+      catch(err){
+        if(err.code==='TOO_LONG') throw err;            // not retryable
+        lastErr=err;
+        const stepHost=document.getElementById('ai-steps-'+pf.fileId);
+        if(attempt<2){
+          if(stepHost) stepHost.innerHTML=`<div class="ai-step active"><div class="ai-step-dot"></div>שירות ה-AI עמוס — מנסה שוב (${attempt+2}/3)…</div>`;
+          await new Promise(r=>setTimeout(r, 1200*(attempt+1)));
+        }
+      }
+    }
+    if(lastErr) throw lastErr;
     // If user preselected an account in the dropdown, force it
     if(pf.preselectedKey){
       result.detectedAccount = pf.preselectedKey;
@@ -1833,11 +1846,33 @@ async function analyzeFile(pf, ext){
   } catch(e) {
     if(e.code==='TOO_LONG'){ showFileTooLong(assignDiv, pf, 'התברר שהקובץ מכיל יותר מדי תנועות לניתוח בבת אחת'); return; }
     console.error('AI analysis failed:', e);
-    assignDiv.innerHTML=`<div class="assign-ambiguous">⚠️ שגיאת AI: ${e.message}<br><small>נסה שוב או בחר חשבון ידנית</small></div>
-      <div class="assign-options">${getAllAccounts().map(a=>`<div class="assign-opt" data-key="${a.key}" onclick="assignFile('${pf.fileId}','${a.key}',this)">${a.icon} ${a.name}</div>`).join('')}</div>
-      <button class="btn-confirm-upload" id="confirm_${pf.fileId}" onclick="confirmUpload('${pf.fileId}')" disabled>✅ אשר ושמור</button>`;
+    // Analysis fully failed → no transactions parsed. Offer a real retry (manual account selection can't recover the data).
+    assignDiv.innerHTML=`<div class="assign-ambiguous">⚠️ ${friendlyAiError(e.message)}</div>
+      <button class="btn-confirm-upload" onclick="retryAnalyze('${pf.fileId}')">🔄 נסה לנתח שוב</button>
+      <button class="btn-confirm-upload" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border2);margin-top:6px;" onclick="removePendingFile('${pf.fileId}')">הסר קובץ</button>`;
   }
 }
+
+// Friendly message for AI analysis failures
+function friendlyAiError(msg){
+  const m=(msg||'').toString().toLowerCase();
+  if(m.includes('internal')||m.includes('overload')||m.includes('529')||m.includes('500')||m.includes('unavailable'))
+    return 'שירות ה-AI החזיר שגיאה זמנית. לרוב לחיצה על "נסה לנתח שוב" פותרת את זה.';
+  if(m.includes('limit')||m.includes('quota')||m.includes('cap')||m.includes('מכס')||m.includes('429'))
+    return 'הגעת למכסת הניתוחים היומית. נסה שוב מאוחר יותר.';
+  if(m.includes('נטען')) return 'החיבור לשרת עדיין נטען — נסה שוב בעוד רגע.';
+  if(m.includes('לא תקינה')) return 'ה-AI החזיר תשובה לא תקינה. נסה לנתח שוב.';
+  return 'שגיאת ניתוח: '+msg+'. נסה לנתח שוב.';
+}
+
+// Re-run AI analysis for a pending file (after a transient failure)
+function retryAnalyze(fileId){
+  const pf=pendingFiles.find(f=>f.fileId===fileId);
+  if(!pf){ showToast('הקובץ כבר אינו ברשימה','error'); return; }
+  const ext=(pf.file?.name||'').split('.').pop().toLowerCase();
+  analyzeFile(pf, ext);
+}
+
 
 // ── AI Analysis via Anthropic API ──
 // קורא לפונקציית השרת (Cloud Function) במקום ישירות ל-Anthropic. המפתח נשאר בשרת.
