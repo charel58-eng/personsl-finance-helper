@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.12";
+const APP_VERSION = "2.13";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -1135,6 +1135,7 @@ function loadTx(){
     transferUnlinked=d.transferUnlinked||[];
     gapExplanations=d.gapExplanations||{};
     migrateIncomeCategories();
+    reconcileSignsFromBalance();
     detectInternalTransfers();
   }catch(e){}
 }
@@ -1949,7 +1950,8 @@ ${contentForAI}
 4. אם detectedLast4 מופיע בחשבון רשום — התאם confidence=high
 5. openingBalance = היתרה לפני הפעולה הראשונה; closingBalance = היתרה אחרי הפעולה האחרונה
 6. cardChargesInBank = רק אם זה דף בנק: כל החיובים שנראים כחיוב כרטיס אשראי (ויזה/מאסטרקארד/ישראכרט/מקס/כאל/דיינרס/אמקס), כולל חיובי חו"ל נפרדים
-7. החזר JSON תקין בלבד`;
+7. החזר JSON תקין בלבד
+8. סימן הסכום קריטי: קבע אותו לפי עמודת זכות/חובה (זכות=חיובי, חובה=שלילי) ולפי כיוון היתרה המצטברת — אם היתרה עלתה זו הכנסה (חיובי), אם ירדה זו הוצאה (שלילי). תיאורים כמו "העברה דיגיטל"/"העברה" יכולים להיות גם הכנסה וגם הוצאה — אל תניח, הכרע לפי העמודה והיתרה`;
 
   const data = await callAnthropicProxy({
     model: 'claude-sonnet-4-6',
@@ -2253,6 +2255,7 @@ async function confirmUpload(fileId){
   }
 
   saveState();
+  const signFixes=reconcileSignsFromBalance();
   detectInternalTransfers();
   saveTx();
   const found=discoverCategories();
@@ -2263,7 +2266,7 @@ async function confirmUpload(fileId){
   const baseMsg = skipped>0
     ? `✅ נקלטו ${toAdd.length} פעולות חדשות · ${skipped} כפילויות דולגו`
     : `✅ נשמר! ${mCount} חודשים נקלטו`;
-  showToast(`${baseMsg}${found.length?` · ${found.length} קטגוריות חדשות`:''}`);
+  showToast(`${baseMsg}${found.length?` · ${found.length} קטגוריות חדשות`:''}${signFixes>0?` · ${signFixes} סימנים תוקנו לפי היתרה`:''}`);
   if(pendingFiles.length===0) setTimeout(()=>showDashboard(),1300);
 }
 
@@ -2594,6 +2597,33 @@ function computeAccountGaps(txList){
   }
   return gaps;
 }
+// The bank's recorded balance column is authoritative. If a transaction's sign contradicts
+// the balance chain (its "before balance" is orphaned but the flipped sign links cleanly),
+// the AI mis-parsed the debit/credit direction → fix the sign from the balance.
+// Returns the number of transactions corrected.
+function reconcileSignsFromBalance(){
+  const cents=x=>Math.round(x*100);
+  const bankKeys=new Set(getAllAccounts().filter(a=>a.type==='bank').map(a=>a.key));
+  let fixed=0;
+  bankKeys.forEach(key=>{
+    const tx=transactions.filter(t=>t.accountKey===key && t.balance!=null && !t.isAdjustment);
+    if(tx.length<2) return;
+    const afterSet=new Set(tx.map(t=>cents(t.balance))); // all recorded balances (authoritative)
+    tx.forEach(t=>{
+      if(!t.amount) return;
+      const before=cents(t.balance - t.amount);   // implied previous balance with current sign
+      const flipped=cents(t.balance + t.amount);   // implied previous balance if the sign were flipped
+      if(!afterSet.has(before) && afterSet.has(flipped)){
+        t.amount=-t.amount; // sign contradicts the balance chain → correct it
+        t.category = t.amount>0 ? categorizeIncome((t.desc||'').toLowerCase()) : categorize(t.desc||'', t.amount);
+        t.catManual=false;
+        fixed++;
+      }
+    });
+  });
+  return fixed;
+}
+
 function startGapEdit(key){ gapEditKey=key; renderReconcile(); setTimeout(()=>document.getElementById('gap-input')?.focus(),60); }
 function cancelGapEdit(){ gapEditKey=null; renderReconcile(); }
 function saveGapEdit(key){
@@ -3803,6 +3833,7 @@ async function loadFromCloud(uid){
           transferUnlinked = d.transferUnlinked||[];
           gapExplanations = d.gapExplanations||{};
           migrateIncomeCategories();
+          reconcileSignsFromBalance();
           detectInternalTransfers();
           _origSaveTx();
         }
