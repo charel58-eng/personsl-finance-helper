@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.11";
+const APP_VERSION = "2.12";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -2567,32 +2567,30 @@ let gapEditKey=null;        // which continuity-gap row is currently being expla
 function fmtBal(b){ return (b<0?'−':'')+fmtAmount(b); }
 function accGapKey(accKey, older, newer){ return accKey+'|'+older+'|'+newer; }
 // Detect breaks in the recorded running balance between consecutive dated days.
-// Order-independent: derives each day's start/end balance from the (balance, amount) pairs.
+// Order-independent & robust: two consecutive days are continuous if ANY of the older
+// day's after-balances equals ANY of the newer day's before-balances (the chain links),
+// regardless of intra-day ordering or messy multi-transaction days. A gap is reported
+// only when no such link exists between the two days.
 function computeAccountGaps(txList){
   const cents=x=>Math.round(x*100);
-  const withBal=txList.filter(t=>t.balance!=null && t.date && !t.isAdjustment);
-  if(withBal.length<2) return [];
+  const tx=txList.filter(t=>t.balance!=null && t.date && !t.isAdjustment);
+  if(tx.length<2) return [];
   const byDate={};
-  withBal.forEach(t=>{ (byDate[t.date]=byDate[t.date]||[]).push(t); });
+  tx.forEach(t=>{ (byDate[t.date]=byDate[t.date]||[]).push(t); });
   const dates=Object.keys(byDate).sort();
-  const endBal=ts=>{
-    if(ts.length===1) return ts[0].balance;
-    const befores=new Set(ts.map(t=>cents(t.balance - t.amount)));
-    const end=ts.find(t=>!befores.has(cents(t.balance)));
-    return end?end.balance:ts[ts.length-1].balance;
-  };
-  const startBal=ts=>{
-    if(ts.length===1) return ts[0].balance - ts[0].amount;
-    const afters=new Set(ts.map(t=>cents(t.balance)));
-    const st=ts.find(t=>!afters.has(cents(t.balance - t.amount)));
-    return st?(st.balance - st.amount):(ts[0].balance - ts[0].amount);
-  };
+  const afters =d=> byDate[d].map(t=>cents(t.balance));
+  const befores=d=> byDate[d].map(t=>cents(t.balance - t.amount));
+  // best-effort terminal/opening of a single day's chain (used only to size a real gap)
+  const endBal=ts=>{ if(ts.length===1)return ts[0].balance; const bef=new Set(ts.map(t=>cents(t.balance-t.amount))); const e=ts.filter(t=>!bef.has(cents(t.balance))); return (e[e.length-1]||ts[ts.length-1]).balance; };
+  const startBal=ts=>{ if(ts.length===1)return ts[0].balance-ts[0].amount; const aft=new Set(ts.map(t=>cents(t.balance))); const s=ts.find(t=>!aft.has(cents(t.balance-t.amount)))||ts[0]; return s.balance - s.amount; };
   const gaps=[];
   for(let i=1;i<dates.length;i++){
-    const prevEnd=endBal(byDate[dates[i-1]]);
-    const curStart=startBal(byDate[dates[i]]);
-    const gap=Math.round((curStart - prevEnd)*100)/100;
-    if(Math.abs(gap)>=1) gaps.push({older:dates[i-1], newer:dates[i], amount:gap});
+    const older=dates[i-1], newer=dates[i];
+    const aOlder=new Set(afters(older));
+    // continuous if the days share a chain link (older after == newer before)
+    if(befores(newer).some(b=>aOlder.has(b))) continue;
+    const gap=Math.round((startBal(byDate[newer]) - endBal(byDate[older]))*100)/100;
+    if(Math.abs(gap)>=1) gaps.push({older, newer, amount:gap});
   }
   return gaps;
 }
