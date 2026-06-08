@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.13";
+const APP_VERSION = "2.15";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -195,7 +195,14 @@ button{cursor:pointer;}
 
 /* reconcile view */
 #screen-reconcile{padding-bottom:calc(80px + env(safe-area-inset-bottom));}
-.rec-head{display:flex;align-items:center;gap:10px;padding:14px 16px 6px;}
+.rec-head{display:flex;align-items:center;gap:10px;padding:58px 16px 6px;}
+.rec-ctrls{display:flex;flex-wrap:wrap;gap:8px;padding:2px 16px 4px;align-items:center;}
+.rec-seg{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:2px;gap:2px;}
+.rec-seg button{background:transparent;border:none;color:var(--text3);font-family:'Heebo';font-size:11px;font-weight:700;padding:5px 9px;border-radius:8px;cursor:pointer;white-space:nowrap;}
+.rec-seg button.on{background:var(--blue-dim);color:var(--blue);}
+.rec-seg-lbl{font-size:10px;color:var(--text3);font-weight:700;}
+.rec-trim{font-size:11px;color:var(--text3);padding:2px 16px 6px;}
+.rec-trim a{color:var(--blue);font-weight:700;cursor:pointer;text-decoration:none;}
 .rec-back{background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text2);font-size:13px;font-weight:700;padding:7px 12px;cursor:pointer;}
 .rec-title{font-size:18px;font-weight:800;}
 .rec-sub{font-size:12px;color:var(--text3);margin-top:2px;}
@@ -635,6 +642,20 @@ button{cursor:pointer;}
   </div>
 </div>
 
+<!-- Account opening / start-date modal -->
+<div class="modal-overlay" id="acc-start-modal" onclick="if(event.target===this)closeAccStart()">
+  <div class="modal-box">
+    <div class="modal-title" id="acc-start-title">📅 תאריך פתיחת החשבון</div>
+    <div class="modal-hint" id="acc-start-hint" style="margin-bottom:12px;"></div>
+    <input class="modal-input" id="acc-start-input" type="month" style="letter-spacing:normal;font-size:16px;">
+    <div class="modal-hint">חודשים שלפני תאריך זה לא ייחשבו כחסרים בהתראות ובשלמות הנתונים.</div>
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="clearAccStart()">מתחילת המעקב</button>
+      <button class="modal-ok" onclick="saveAccStart()">שמירה</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ RECONCILE SCREEN ═══ -->
 <div class="screen" id="screen-reconcile">
   <div class="rec-head">
@@ -642,6 +663,8 @@ button{cursor:pointer;}
     <div><div class="rec-title" id="rec-title">בדיקת התאמות</div><div class="rec-sub" id="rec-sub"></div></div>
   </div>
   <div class="rec-toolbar" id="rec-toolbar"></div>
+  <div class="rec-ctrls" id="rec-ctrls"></div>
+  <div class="rec-trim" id="rec-trim"></div>
   <div class="rec-tx-list" id="rec-tx-list"></div>
   <div class="bottom-nav">
     <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
@@ -1046,6 +1069,7 @@ let state = {
   setupDone: false,
   cardBankLinks: {},   // {cardKey: bankKey} — which bank account each card is charged to
   verifiedMonths: {},  // {accountKey: ['2026-01', ...]} — months that passed balance/charge checks
+  accountStarts: {},   // {accountKey: 'YYYY-MM'} — per-account opening month; months before it aren't counted as missing
 };
 
 // notesArchive: [{id, accountKey, type:'logo'|'balance'|'card_charge', severity:'info'|'warn'|'severe', text, date, resolved}]
@@ -1096,6 +1120,7 @@ function saveState() {
     setupDone:state.setupDone,
     cardBankLinks:state.cardBankLinks||{},
     verifiedMonths:state.verifiedMonths||{},
+    accountStarts:state.accountStarts||{},
   };
   try{localStorage.setItem(STORAGE_KEY,JSON.stringify(s));}catch(e){}
 }
@@ -1113,6 +1138,7 @@ function loadState() {
     state.setupDone=s.setupDone||false;
     state.cardBankLinks=s.cardBankLinks||{};
     state.verifiedMonths=s.verifiedMonths||{};
+    state.accountStarts=s.accountStarts||{};
     return true;
   }catch(e){return false;}
 }
@@ -1346,9 +1372,15 @@ function showOverlapBlock(pf, conflicts){
 // ═══════════════════════════
 //  COMPLETENESS ENGINE
 // ═══════════════════════════
+// Effective start month for an account = the LATER of the global tracking start and the
+// account's own opening month. Months before it are not counted as missing/incomplete.
+function effAccountStart(accountKey){
+  const a=(state.accountStarts||{})[accountKey];
+  return (a && a>state.startDate) ? a : state.startDate;
+}
 function getAccountCompleteness(accountKey) {
   const now = getCurrentYYYYMM();
-  const months = getMonthsBetween(state.startDate, now);
+  const months = getMonthsBetween(effAccountStart(accountKey), now);
   const covered = new Set(uploadedFiles.filter(f=>f.accountKey===accountKey).flatMap(f=>f.coveredMonths&&f.coveredMonths.length?f.coveredMonths:getMonthsBetween(f.dateRange.from, f.dateRange.to)));
   const result = months.map(m=>({month:m, status: m>now?'future': covered.has(m)?'full':'missing'}));
   const covered_count = result.filter(x=>x.status==='full').length;
@@ -1610,7 +1642,7 @@ function renderAccountSection(containerId, type){
     const statusText=comp.pct===100?'✅ שלם':comp.pct>0?`${comp.pct}% שלם`:'⚠️ אין נתונים';
     const fillColor=comp.pct===100?'var(--green)':comp.pct>0?'var(--amber)':'var(--red)';
     const now=getCurrentYYYYMM();
-    const allMonths=getMonthsBetween(state.startDate,now);
+    const allMonths=getMonthsBetween(effAccountStart(acc.key),now);
     const dotsHtml=allMonths.slice(-12).map(m=>{
       const st=comp.months.find(x=>x.month===m);
       const s=st?st.status:'future';
@@ -2242,6 +2274,7 @@ async function confirmUpload(fileId){
     ? [...new Set(toAdd.map(t=>(t.date||dr.from+'-01').slice(0,7)))].sort()
     : (result.coveredMonths&&result.coveredMonths.length?result.coveredMonths:getMonthsBetween(dr.from,dr.to));
 
+  const isFirstFile = uploadedFiles.filter(f=>f.accountKey===pf.assignedKey).length===0;
   uploadedFiles.push({fileId:pf.fileId,accountKey:pf.assignedKey,dateRange:dr,coveredMonths:covered,txCount:toAdd.length,fileName:pf.file.name,summary:result.summary||{}});
 
   toAdd.forEach((t,i)=>{
@@ -2267,7 +2300,16 @@ async function confirmUpload(fileId){
     ? `✅ נקלטו ${toAdd.length} פעולות חדשות · ${skipped} כפילויות דולגו`
     : `✅ נשמר! ${mCount} חודשים נקלטו`;
   showToast(`${baseMsg}${found.length?` · ${found.length} קטגוריות חדשות`:''}${signFixes>0?` · ${signFixes} סימנים תוקנו לפי היתרה`:''}`);
-  if(pendingFiles.length===0) setTimeout(()=>showDashboard(),1300);
+  if(pendingFiles.length===0){
+    // First file for this account whose data starts AFTER the global tracking start →
+    // likely opened mid-period. Ask the user to confirm/adjust the opening month.
+    const earliest=(covered&&covered.length)?[...covered].sort()[0]:'';
+    if(isFirstFile && !(state.accountStarts||{})[pf.assignedKey] && earliest && earliest>state.startDate){
+      setTimeout(()=>openAccStart(pf.assignedKey, earliest, true),900);
+    } else {
+      setTimeout(()=>showDashboard(),1300);
+    }
+  }
 }
 
 // Show validation issues UI — user must resolve before saving
@@ -2664,8 +2706,42 @@ function renderGapRow(accKey, older, newer, amount){
   </div>`;
 }
 
+// ── reconcile view preferences (display-only; localStorage, not synced to Firestore) ──
+let recSort='date';   // 'date' | 'amount' | 'desc'
+let recRange='';      // '' (uninitialised) | 'year' | '3m' | 'all'
+(function loadRecPrefs(){
+  try{ const s=JSON.parse(localStorage.getItem('fp_rec_view')||'{}');
+    if(s.sort) recSort=s.sort; if(s.range) recRange=s.range; }catch(e){}
+})();
+function saveRecPrefs(){ try{ localStorage.setItem('fp_rec_view', JSON.stringify({sort:recSort,range:recRange})); }catch(e){} }
+function setRecSort(s){ recSort=s; saveRecPrefs(); renderReconcile(); }
+function setRecRange(r){ recRange=r; saveRecPrefs(); renderReconcile(); }
+// default = the LONGER of {current calendar year, last 3 months} → earlier cutoff wins
+function recDefaultRange(){
+  const now=new Date();
+  const yearCut=now.getFullYear()+'-01-01';
+  const d=new Date(now); d.setMonth(d.getMonth()-3);
+  const m3Cut=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  return yearCut<=m3Cut ? 'year' : '3m';
+}
+function recRangeCutoff(range){
+  const now=new Date();
+  if(range==='all') return null;
+  if(range==='year') return now.getFullYear()+'-01-01';
+  const d=new Date(now); d.setMonth(d.getMonth()-3); // '3m'
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function recSortList(arr){
+  const a=[...arr];
+  if(recSort==='amount') a.sort((x,y)=>Math.abs(y.amount)-Math.abs(x.amount)||(y.date||'').localeCompare(x.date||''));
+  else if(recSort==='desc') a.sort((x,y)=>(x.desc||'').localeCompare(y.desc||'','he')||(y.date||'').localeCompare(x.date||''));
+  else a.sort((x,y)=>(y.date||'').localeCompare(x.date||'')); // 'date' newest→oldest
+  return a;
+}
+
 function showReconcile(key){
   recAccountKey=key;
+  if(!recRange) recRange=recDefaultRange();
   showScreen('screen-reconcile');
   renderReconcile();
 }
@@ -2673,27 +2749,58 @@ function showReconcile(key){
 function renderReconcile(){
   const acc=getAllAccounts().find(a=>a.key===recAccountKey);
   if(!acc){ showDashboard(); return; }
+  if(!recRange) recRange=recDefaultRange();
   document.getElementById('rec-title').textContent=`${acc.icon} ${acc.name}`;
-  const list=transactions.filter(t=>t.accountKey===recAccountKey)
+  const isBank=acc.type==='bank';
+
+  // full account history (always date-desc) — source of truth for continuity/gaps
+  const full=transactions.filter(t=>t.accountKey===recAccountKey)
     .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  const expense=list.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
-  const income=list.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
-  document.getElementById('rec-sub').textContent=`${list.length} פעולות · בדוק ושנה סיווג`;
+
+  // time-range filter (display only — continuity below still runs on full history)
+  const cutoff=recRangeCutoff(recRange);
+  const inRange = cutoff ? full.filter(t=>(t.date||'')>=cutoff) : full;
+
+  // totals reflect the displayed range only
+  const expense=inRange.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const income=inRange.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+  document.getElementById('rec-sub').textContent=`${inRange.length} פעולות · בדוק ושנה סיווג`;
   document.getElementById('rec-toolbar').innerHTML=`
-    <div class="rec-chip"><div class="n">${list.length}</div><div class="l">פעולות</div></div>
+    <div class="rec-chip"><div class="n">${inRange.length}</div><div class="l">פעולות</div></div>
     <div class="rec-chip"><div class="n" style="color:var(--red)">${fmtAmount(expense)}</div><div class="l">הוצאות</div></div>
     <div class="rec-chip"><div class="n" style="color:var(--green)">${fmtAmount(income)}</div><div class="l">הכנסות</div></div>`;
+
+  // sort + range controls
+  const sBtn=(v,l)=>`<button class="${recSort===v?'on':''}" onclick="setRecSort('${v}')">${l}</button>`;
+  const rBtn=(v,l)=>`<button class="${recRange===v?'on':''}" onclick="setRecRange('${v}')">${l}</button>`;
+  document.getElementById('rec-ctrls').innerHTML=`
+    <span class="rec-seg-lbl">מיון</span>
+    <div class="rec-seg">${sBtn('date','תאריך')}${sBtn('amount','סכום')}${sBtn('desc','תיאור')}</div>
+    <span class="rec-seg-lbl">טווח</span>
+    <div class="rec-seg">${rBtn('year','שנה נוכחית')}${rBtn('3m','3 חודשים')}${rBtn('all','הכל')}</div>`;
+
+  // "showing X of Y" note when older items are trimmed
+  const trim=document.getElementById('rec-trim');
+  trim.innerHTML=(cutoff && inRange.length<full.length)
+    ? `מציג ${inRange.length} מתוך ${full.length} פעולות · <a onclick="setRecRange('all')">הצג הכל</a>` : '';
+
   const cats=allCatMeta();
-  const isBank=acc.type==='bank';
-  // continuity gaps (bank accounts only) → place a marker just above the older-date block
+  // continuity gaps: bank-only AND only meaningful in date order. Computed on FULL history,
+  // shown only when both endpoints are within the visible range.
+  const showGaps = isBank && recSort==='date';
   const gapBeforeOlder={};
-  if(isBank){
-    computeAccountGaps(list).forEach(g=>{ gapBeforeOlder[g.older]={amount:g.amount, newer:g.newer}; });
+  if(showGaps){
+    const vis=new Set(inRange.map(t=>t.date));
+    computeAccountGaps(full).forEach(g=>{
+      if(vis.has(g.older) && vis.has(g.newer)) gapBeforeOlder[g.older]={amount:g.amount, newer:g.newer};
+    });
   }
+
+  const display=recSortList(inRange);
   let prevDate=null;
   const parts=[];
-  list.forEach(t=>{
-    if(t.date!==prevDate){
+  display.forEach(t=>{
+    if(showGaps && t.date!==prevDate){
       const g=gapBeforeOlder[t.date];
       if(g) parts.push(renderGapRow(acc.key, t.date, g.newer, g.amount));
       prevDate=t.date;
@@ -2718,7 +2825,7 @@ function renderReconcile(){
       </div>
     </div>`);
   });
-  document.getElementById('rec-tx-list').innerHTML=parts.join('')||'<div class="empty-state" style="padding:24px">אין פעולות לחשבון זה.<br>העלה דף בנק או פירוט כרטיס תחילה.</div>';
+  document.getElementById('rec-tx-list').innerHTML=parts.join('')||`<div class="empty-state" style="padding:24px">${full.length===0?'אין פעולות לחשבון זה.<br>העלה דף בנק או פירוט כרטיס תחילה.':'אין פעולות בטווח הנבחר.<br>בחר טווח "הכל" כדי לראות הכל.'}</div>`;
 }
 
 // ── edit modal ──
@@ -3585,10 +3692,18 @@ function renderSettings(){
     const insts=state.bankInstances[id]||[];
     return `<div class="settings-row">
       <div class="settings-row-header"><div class="settings-row-name">${b.icon} ${b.name}</div></div>
-      <div class="settings-instances">${insts.map((inst,i)=>`
+      <div class="settings-instances">${insts.map((inst,i)=>{
+        const acctKey=`bank_${id}_${inst.id}`;
+        return `
         <div class="si-row"><span class="si-icon">🏦</span><span class="si-name">חשבון ${i+1}</span>
         <span class="si-digits">${inst.digits?'••••'+inst.digits:'—'}</span>
-        <span class="si-edit" onclick="openDigitsModal('bank','${id}','${inst.id}','${b.name} חשבון ${i+1}')">ערוך</span></div>`).join('')}
+        <span class="si-edit" onclick="openDigitsModal('bank','${id}','${inst.id}','${b.name} חשבון ${i+1}')">ערוך</span></div>
+        <div class="si-row" style="padding-right:24px;">
+          <span class="si-name" style="font-size:12px;color:var(--text2);">📅 תאריך התחלה:</span>
+          <span class="si-digits" style="flex:1;">${fmtStartLabel(acctKey)}</span>
+          <span class="si-edit" onclick="openAccStart('${acctKey}')">ערוך</span>
+        </div>`;
+      }).join('')}
       </div></div>`;
   }).join('');}
 
@@ -3614,6 +3729,11 @@ function renderSettings(){
             <option value="">— בחר חשבון —</option>
             ${bankAccounts.map(b=>`<option value="${b.key}" ${b.key===linkedBank?'selected':''}>${b.icon} ${b.name}</option>`).join('')}
           </select>
+        </div>
+        <div class="si-row" style="padding-right:24px;">
+          <span class="si-name" style="font-size:12px;color:var(--text2);">📅 תאריך התחלה:</span>
+          <span class="si-digits" style="flex:1;">${fmtStartLabel(cardKey)}</span>
+          <span class="si-edit" onclick="openAccStart('${cardKey}')">ערוך</span>
         </div>`;
       }).join('')}
       </div></div>`;
@@ -3630,6 +3750,58 @@ function setCardBankLink(cardKey, bankKey){
   else delete state.cardBankLinks[cardKey];
   saveState();
   showToast('✅ קישור נשמר');
+}
+
+// ── Account opening / start-date ──
+let accStartKey=null, accStartFromUpload=false;
+function fmtStartLabel(key){
+  const v=(state.accountStarts||{})[key];
+  if(!v || v<=state.startDate) return 'מתחילת המעקב';
+  const d=new Date(v+'-01');
+  return d.toLocaleDateString('he-IL',{year:'numeric',month:'long'});
+}
+function openAccStart(key, detectedMonth, fromUpload){
+  accStartKey=key; accStartFromUpload=!!fromUpload;
+  const acc=getAllAccounts().find(a=>a.key===key);
+  const cur=(state.accountStarts||{})[key]||'';
+  const inp=document.getElementById('acc-start-input');
+  inp.min=state.startDate;
+  inp.max=getCurrentYYYYMM();
+  inp.value=detectedMonth||cur||state.startDate;
+  document.getElementById('acc-start-title').textContent = fromUpload ? '📅 זוהה תאריך פתיחה' : '📅 תאריך פתיחת החשבון';
+  const nm = acc ? `${acc.icon} ${acc.name}` : 'החשבון';
+  document.getElementById('acc-start-hint').innerHTML = fromUpload
+    ? `נראה ש${nm} נפתח בערך ב‑<b>${detectedMonth}</b>. אם זה נכון לחץ שמירה, או שנה את התאריך:`
+    : nm;
+  document.getElementById('acc-start-modal').classList.add('open');
+  setTimeout(()=>inp?.focus(),60);
+}
+function closeAccStart(){
+  document.getElementById('acc-start-modal').classList.remove('open');
+  const wasUpload=accStartFromUpload;
+  accStartKey=null; accStartFromUpload=false;
+  if(wasUpload) setTimeout(()=>showDashboard(),150);
+}
+function _afterAccStartChange(){
+  saveState(); if(typeof currentUser!=='undefined' && currentUser) saveToCloud();
+  const wasUpload=accStartFromUpload;
+  closeAccStart();
+  if(!wasUpload){
+    if(document.getElementById('screen-settings')?.classList.contains('active')) renderSettings();
+    if(document.getElementById('screen-dashboard')?.classList.contains('active')) renderDashboard();
+  }
+}
+function saveAccStart(){
+  if(!accStartKey){ closeAccStart(); return; }
+  const v=document.getElementById('acc-start-input').value;
+  state.accountStarts=state.accountStarts||{};
+  if(v && v>state.startDate) state.accountStarts[accStartKey]=v;
+  else delete state.accountStarts[accStartKey];
+  _afterAccStartChange();
+}
+function clearAccStart(){
+  if(accStartKey){ state.accountStarts=state.accountStarts||{}; delete state.accountStarts[accStartKey]; }
+  _afterAccStartChange();
 }
 
 // ── Notes Archive ──
@@ -3684,7 +3856,7 @@ function saveDigits(){
 function resetSetup(){
   if(!confirm('למחוק את כל ההגדרות והנתונים?'))return;
   try{localStorage.removeItem(STORAGE_KEY);localStorage.removeItem(TRANSACTIONS_KEY);}catch(e){}
-  state={currentStep:0,selectedBanks:new Set(),bankInstances:{},selectedCards:new Set(),cardInstances:{},startDate:'2026-01',reminder:'biweekly',setupDone:false,cardBankLinks:{},verifiedMonths:{}};
+  state={currentStep:0,selectedBanks:new Set(),bankInstances:{},selectedCards:new Set(),cardInstances:{},startDate:'2026-01',reminder:'biweekly',setupDone:false,cardBankLinks:{},verifiedMonths:{},accountStarts:{}};
   transactions=[];uploadedFiles=[];pendingFiles=[];customCategories={};merchantOverrides={};supplierOverrides={};incomeOverrides={};customIncomeCats={};notesArchive=[];
   initOnboarding();showScreen('screen-onboarding');
 }
@@ -3779,6 +3951,7 @@ async function saveToCloud(){
         setupDone:state.setupDone,
         cardBankLinks:state.cardBankLinks||{},
         verifiedMonths:state.verifiedMonths||{},
+        accountStarts:state.accountStarts||{},
         updatedAt: Date.now()
       });
       await setDoc(doc(db,'users',uid,'data','transactions'), {
@@ -3815,6 +3988,7 @@ async function loadFromCloud(uid){
           state.setupDone = s.setupDone||false;
           state.cardBankLinks = s.cardBankLinks||{};
           state.verifiedMonths = s.verifiedMonths||{};
+          state.accountStarts = s.accountStarts||{};
           _origSaveState();
         }
         const txSnap = await getDoc(doc(db,'users',uid,'data','transactions'));
