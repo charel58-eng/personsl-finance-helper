@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.15";
+const APP_VERSION = "2.17";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -195,8 +195,9 @@ button{cursor:pointer;}
 
 /* reconcile view */
 #screen-reconcile{padding-bottom:calc(80px + env(safe-area-inset-bottom));}
-.rec-head{display:flex;align-items:center;gap:10px;padding:58px 16px 6px;}
-.rec-ctrls{display:flex;flex-wrap:wrap;gap:8px;padding:2px 16px 4px;align-items:center;}
+.rec-sticky{position:sticky;top:0;z-index:40;background:var(--bg);}
+.rec-head{display:flex;align-items:center;gap:10px;padding:58px 16px 4px;}
+.rec-ctrls{display:flex;flex-wrap:wrap;gap:8px;padding:2px 16px 6px;align-items:center;}
 .rec-seg{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:2px;gap:2px;}
 .rec-seg button{background:transparent;border:none;color:var(--text3);font-family:'Heebo';font-size:11px;font-weight:700;padding:5px 9px;border-radius:8px;cursor:pointer;white-space:nowrap;}
 .rec-seg button.on{background:var(--blue-dim);color:var(--blue);}
@@ -206,10 +207,10 @@ button{cursor:pointer;}
 .rec-back{background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text2);font-size:13px;font-weight:700;padding:7px 12px;cursor:pointer;}
 .rec-title{font-size:18px;font-weight:800;}
 .rec-sub{font-size:12px;color:var(--text3);margin-top:2px;}
-.rec-toolbar{display:flex;gap:8px;padding:8px 16px;flex-wrap:wrap;}
-.rec-chip{flex:1;min-width:90px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:8px 10px;text-align:center;}
-.rec-chip .n{font-size:16px;font-weight:800;}
-.rec-chip .l{font-size:10px;color:var(--text3);}
+.rec-toolbar{display:flex;gap:8px;padding:2px 16px 4px;flex-wrap:wrap;}
+.rec-chip{flex:1;min-width:80px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:5px 8px;text-align:center;}
+.rec-chip .n{font-size:13px;font-weight:800;}
+.rec-chip .l{font-size:9px;color:var(--text3);}
 .rec-tx-list{padding:4px 12px;}
 .rec-tx{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:7px;cursor:pointer;}
 .rec-tx:active{opacity:.7;}
@@ -217,6 +218,9 @@ button{cursor:pointer;}
 .rec-tx-mid{flex:1;min-width:0;}
 .rec-tx-desc{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .rec-tx-meta{font-size:11px;color:var(--text3);margin-top:2px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.rec-date{font-size:12.5px;color:var(--text2);font-weight:700;}
+.rec-month-sel{background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text2);font-family:'Heebo';font-size:11px;font-weight:700;padding:5px 8px;cursor:pointer;}
+.rec-month-sel.on{border-color:var(--blue-glow);color:var(--blue);background:var(--blue-dim);}
 .rec-tag{background:var(--surface3);border-radius:6px;padding:1px 6px;font-size:10px;color:var(--text2);}
 .rec-tag.sup{background:var(--blue-dim);color:var(--blue);}
 .rec-tx-amt{font-weight:800;font-size:14px;white-space:nowrap;}
@@ -228,7 +232,7 @@ button{cursor:pointer;}
 .rec-scope-btn:active{opacity:.7;}
 .rec-scope-btn strong{display:block;font-size:15px;margin-bottom:2px;}
 .rec-scope-btn small{color:var(--text3);font-size:12px;}
-.rec-bal{font-size:10px;color:var(--text3);margin-top:3px;font-weight:600;}
+.rec-bal{font-size:12px;color:var(--text3);margin-top:3px;font-weight:600;}
 .rec-gap{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--amber-dim);border:1px dashed var(--amber);border-radius:12px;padding:10px 12px;margin-bottom:7px;}
 .rec-gap.explained{background:var(--surface2);border-style:solid;border-color:var(--border2);}
 .rec-gap-txt{font-size:12px;color:var(--amber);line-height:1.5;}
@@ -249,6 +253,7 @@ button{cursor:pointer;}
 .comp-month-dot.partial{background:var(--amber-dim);color:var(--amber);border:1px solid var(--amber-glow);}
 .comp-month-dot.missing{background:var(--red-dim);color:var(--red);border:1px solid var(--red-glow);}
 .comp-month-dot.future{background:var(--surface3);color:var(--text3);border:1px solid var(--border);}
+.comp-month-dot.pending{background:var(--surface2);color:var(--text3);border:1px dashed var(--border2);}
 
 /* Transactions */
 .tx-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:8px;}
@@ -658,12 +663,14 @@ button{cursor:pointer;}
 
 <!-- ═══ RECONCILE SCREEN ═══ -->
 <div class="screen" id="screen-reconcile">
-  <div class="rec-head">
-    <button class="rec-back" onclick="showDashboard()">→ חזרה</button>
-    <div><div class="rec-title" id="rec-title">בדיקת התאמות</div><div class="rec-sub" id="rec-sub"></div></div>
+  <div class="rec-sticky">
+    <div class="rec-head">
+      <button class="rec-back" onclick="showDashboard()">→ חזרה</button>
+      <div><div class="rec-title" id="rec-title">בדיקת התאמות</div><div class="rec-sub" id="rec-sub"></div></div>
+    </div>
+    <div class="rec-toolbar" id="rec-toolbar"></div>
+    <div class="rec-ctrls" id="rec-ctrls"></div>
   </div>
-  <div class="rec-toolbar" id="rec-toolbar"></div>
-  <div class="rec-ctrls" id="rec-ctrls"></div>
   <div class="rec-trim" id="rec-trim"></div>
   <div class="rec-tx-list" id="rec-tx-list"></div>
   <div class="bottom-nav">
@@ -1378,14 +1385,45 @@ function effAccountStart(accountKey){
   const a=(state.accountStarts||{})[accountKey];
   return (a && a>state.startDate) ? a : state.startDate;
 }
+function nextMonthStr(m){ let [y,mo]=m.split('-').map(Number); mo++; if(mo>12){mo=1;y++;} return `${y}-${String(mo).padStart(2,'0')}`; }
+// Has the statement for month `m` come due yet? Banks: 1st of the following month. Cards: 10th of the following month.
+// (e.g. June card statement is due on 10 July → no "missing" alert before then.)
+function monthStatementDue(m, type){
+  const [y,mo]=m.split('-').map(Number);
+  const day=(type==='card')?10:1;
+  const due=new Date(y, mo, day, 0,0,0,0); // mo is 1-based → as 0-based index it's the NEXT month
+  return new Date()>=due;
+}
+// For a covered month, is it FULL or only PARTIAL? It's full when the start of the next month is visible
+// (next month also covered) OR activity reaches near month-end; otherwise it's partial.
+function monthCoverageQuality(accountKey, m, covered){
+  if(covered.has(nextMonthStr(m))) return 'full';
+  const days=transactions
+    .filter(t=>t.accountKey===accountKey && (t.date||'').slice(0,7)===m && t.date && t.date.length>=10)
+    .map(t=>parseInt(t.date.slice(8,10),10)||0);
+  const lastDay=days.length?Math.max(...days):0;
+  return lastDay>=26 ? 'full' : 'partial';
+}
 function getAccountCompleteness(accountKey) {
+  const acc=getAllAccounts().find(a=>a.key===accountKey);
+  const type=acc?acc.type:'bank';
   const now = getCurrentYYYYMM();
   const months = getMonthsBetween(effAccountStart(accountKey), now);
   const covered = new Set(uploadedFiles.filter(f=>f.accountKey===accountKey).flatMap(f=>f.coveredMonths&&f.coveredMonths.length?f.coveredMonths:getMonthsBetween(f.dateRange.from, f.dateRange.to)));
-  const result = months.map(m=>({month:m, status: m>now?'future': covered.has(m)?'full':'missing'}));
-  const covered_count = result.filter(x=>x.status==='full').length;
-  const pct = months.length>0 ? Math.round(covered_count/months.length*100) : 0;
-  return {months:result, pct, missingMonths: result.filter(x=>x.status==='missing').map(x=>x.month)};
+  const result = months.map(m=>{
+    let status;
+    if(m>now) status='future';
+    else if(covered.has(m)) status=monthCoverageQuality(accountKey, m, covered); // 'full' | 'partial'
+    else status=monthStatementDue(m, type) ? 'missing' : 'pending'; // grace period until statement is due
+    return {month:m, status};
+  });
+  // % counts full=1, partial=0.5; denominator excludes 'future' and 'pending' (not yet expected)
+  const scored = result.filter(x=>x.status!=='future' && x.status!=='pending');
+  const num = scored.reduce((s,x)=>s+(x.status==='full'?1:x.status==='partial'?0.5:0),0);
+  const pct = scored.length>0 ? Math.round(num/scored.length*100) : 0;
+  return {months:result, pct,
+    missingMonths: result.filter(x=>x.status==='missing').map(x=>x.month),
+    partialMonths: result.filter(x=>x.status==='partial').map(x=>x.month)};
 }
 
 function buildAlerts() {
@@ -1647,7 +1685,8 @@ function renderAccountSection(containerId, type){
       const st=comp.months.find(x=>x.month===m);
       const s=st?st.status:'future';
       const [,mo]=m.split('-');
-      return `<div class="comp-month-dot ${s}" title="${MONTHS_FULL[parseInt(mo)-1]}">${MONTHS_HE[parseInt(mo)-1]}</div>`;
+      const hint={full:'✓ הושלם',partial:'חלקי — לא נראית תחילת החודש הבא',missing:'חסר',pending:'טרם נדרש',future:''}[s]||'';
+      return `<div class="comp-month-dot ${s}" title="${MONTHS_FULL[parseInt(mo)-1]}${hint?' · '+hint:''}">${MONTHS_HE[parseInt(mo)-1]}</div>`;
     }).join('');
     return `<div class="account-card">
       <div class="acc-main">
@@ -2716,6 +2755,7 @@ let recRange='';      // '' (uninitialised) | 'year' | '3m' | 'all'
 function saveRecPrefs(){ try{ localStorage.setItem('fp_rec_view', JSON.stringify({sort:recSort,range:recRange})); }catch(e){} }
 function setRecSort(s){ recSort=s; saveRecPrefs(); renderReconcile(); }
 function setRecRange(r){ recRange=r; saveRecPrefs(); renderReconcile(); }
+function setRecMonth(v){ setRecRange(v ? ('m:'+v) : recDefaultRange()); }
 // default = the LONGER of {current calendar year, last 3 months} → earlier cutoff wins
 function recDefaultRange(){
   const now=new Date();
@@ -2730,6 +2770,19 @@ function recRangeCutoff(range){
   if(range==='year') return now.getFullYear()+'-01-01';
   const d=new Date(now); d.setMonth(d.getMonth()-3); // '3m'
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+// last 12 calendar months (current first), as ['YYYY-MM', ...]
+function recLast12Months(){
+  const out=[]; const d=new Date();
+  for(let i=0;i<12;i++){ out.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')); d.setMonth(d.getMonth()-1); }
+  return out;
+}
+// Apply the active range to a list. Supports 'all', 'year', '3m', and 'm:YYYY-MM' (single month).
+function recRangeApply(list, range){
+  if(!range || range==='all') return list;
+  if(range.indexOf('m:')===0){ const mo=range.slice(2); return list.filter(t=>(t.date||'').slice(0,7)===mo); }
+  const cutoff=recRangeCutoff(range);
+  return cutoff ? list.filter(t=>(t.date||'')>=cutoff) : list;
 }
 function recSortList(arr){
   const a=[...arr];
@@ -2758,8 +2811,7 @@ function renderReconcile(){
     .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
 
   // time-range filter (display only — continuity below still runs on full history)
-  const cutoff=recRangeCutoff(recRange);
-  const inRange = cutoff ? full.filter(t=>(t.date||'')>=cutoff) : full;
+  const inRange = recRangeApply(full, recRange);
 
   // totals reflect the displayed range only
   const expense=inRange.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
@@ -2771,17 +2823,27 @@ function renderReconcile(){
     <div class="rec-chip"><div class="n" style="color:var(--green)">${fmtAmount(income)}</div><div class="l">הכנסות</div></div>`;
 
   // sort + range controls
+  const isMonth = recRange.indexOf('m:')===0;
+  const selMonth = isMonth ? recRange.slice(2) : '';
   const sBtn=(v,l)=>`<button class="${recSort===v?'on':''}" onclick="setRecSort('${v}')">${l}</button>`;
-  const rBtn=(v,l)=>`<button class="${recRange===v?'on':''}" onclick="setRecRange('${v}')">${l}</button>`;
+  const rBtn=(v,l)=>`<button class="${(!isMonth && recRange===v)?'on':''}" onclick="setRecRange('${v}')">${l}</button>`;
+  const monthOpts=recLast12Months().map(m=>{
+    const d=new Date(m+'-01');
+    const lbl=d.toLocaleDateString('he-IL',{year:'2-digit',month:'long'});
+    return `<option value="${m}" ${m===selMonth?'selected':''}>${lbl}</option>`;
+  }).join('');
   document.getElementById('rec-ctrls').innerHTML=`
     <span class="rec-seg-lbl">מיון</span>
     <div class="rec-seg">${sBtn('date','תאריך')}${sBtn('amount','סכום')}${sBtn('desc','תיאור')}</div>
     <span class="rec-seg-lbl">טווח</span>
-    <div class="rec-seg">${rBtn('year','שנה נוכחית')}${rBtn('3m','3 חודשים')}${rBtn('all','הכל')}</div>`;
+    <div class="rec-seg">${rBtn('year','שנה נוכחית')}${rBtn('3m','3 חודשים')}${rBtn('all','הכל')}</div>
+    <select class="rec-month-sel ${isMonth?'on':''}" onchange="setRecMonth(this.value)">
+      <option value="">חודש ספציפי…</option>${monthOpts}
+    </select>`;
 
-  // "showing X of Y" note when older items are trimmed
+  // "showing X of Y" note when items are trimmed
   const trim=document.getElementById('rec-trim');
-  trim.innerHTML=(cutoff && inRange.length<full.length)
+  trim.innerHTML=(inRange.length<full.length)
     ? `מציג ${inRange.length} מתוך ${full.length} פעולות · <a onclick="setRecRange('all')">הצג הכל</a>` : '';
 
   const cats=allCatMeta();
@@ -2814,7 +2876,7 @@ function renderReconcile(){
       <div class="rec-tx-mid">
         <div class="rec-tx-desc">${t.desc||'פעולה'}</div>
         <div class="rec-tx-meta">
-          <span>${t.date||''}</span>
+          <span class="rec-date">${t.date||''}</span>
           <span class="rec-tag">${cat.icon} ${cat.name}</span>
           <span class="rec-tag sup">🏷️ ${sup}</span>
         </div>
