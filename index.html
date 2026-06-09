@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.19";
+const APP_VERSION = "2.21";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -208,8 +208,11 @@ button{cursor:pointer;}
 .wl-flag{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:6px;margin-inline-start:6px;}
 .wl-flag.suspect{background:var(--amber-dim);color:var(--amber);}
 .wl-flag.repeat{background:var(--red-dim);color:var(--red);}
-.wl-approve{flex-shrink:0;background:var(--green-dim);color:var(--green);border:1px solid var(--green-glow);border-radius:9px;font-family:'Heebo';font-size:12px;font-weight:800;padding:7px 12px;cursor:pointer;}
+.wl-actions{display:flex;flex-direction:column;gap:5px;flex-shrink:0;}
+.wl-approve{background:var(--green-dim);color:var(--green);border:1px solid var(--green-glow);border-radius:9px;font-family:'Heebo';font-size:12px;font-weight:800;padding:7px 12px;cursor:pointer;white-space:nowrap;}
 .wl-approve:active{opacity:.7;}
+.wl-trust{background:var(--blue-dim);color:var(--blue);border:1px solid var(--blue-glow);border-radius:9px;font-family:'Heebo';font-size:11px;font-weight:700;padding:6px 10px;cursor:pointer;white-space:nowrap;}
+.wl-trust:active{opacity:.7;}
 #screen-reconcile{padding-top:calc(env(safe-area-inset-top,0px) + var(--userbar-h));}
 .rec-head{display:flex;align-items:center;gap:10px;padding:6px 16px 4px;}
 .rec-ctrls{display:flex;flex-wrap:wrap;gap:8px;padding:2px 16px 6px;align-items:center;}
@@ -1118,6 +1121,9 @@ let incomeOverrides = {};
 // customIncomeCats: {inc_cust_*: {name,icon,color}} — user-created income types
 let customIncomeCats = {};
 let catMetaOverrides = {};   // {catId:{name}} — display-name overrides for ANY category (base or custom)
+// trustedSuppliers: {canonicalSupplierName: true} — supplier the user "always classifies" the same way;
+// future transactions from it are auto-handled (skip the worklist) unless flagged as a duplicate.
+let trustedSuppliers = {};
 
 // ── Internal transfers (bank↔bank) ──
 // transferLinks: [{a:txId, b:txId, auto:bool}] — confirmed pairs of two legs of the same internal transfer
@@ -1168,7 +1174,7 @@ function loadState() {
     return true;
   }catch(e){return false;}
 }
-function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,customIncomeCats,catMetaOverrides,notesArchive,transferLinks,transferUnlinked,gapExplanations}));}catch(e){}}
+function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,customIncomeCats,catMetaOverrides,notesArchive,transferLinks,transferUnlinked,gapExplanations,trustedSuppliers}));}catch(e){}}
 function loadTx(){
   try{
     const raw=localStorage.getItem(TRANSACTIONS_KEY);
@@ -1186,6 +1192,7 @@ function loadTx(){
     transferLinks=d.transferLinks||[];
     transferUnlinked=d.transferUnlinked||[];
     gapExplanations=d.gapExplanations||{};
+    trustedSuppliers=d.trustedSuppliers||{};
     migrateIncomeCategories();
     reconcileSignsFromBalance();
     detectInternalTransfers();
@@ -1679,7 +1686,12 @@ let worklistSort = 'suspect';             // 'suspect' | 'size' | 'date' | 'repe
 try{ const s=localStorage.getItem('fp_worklist_sort'); if(s) worklistSort=s; }catch(e){}
 function setWorklistSort(m){ worklistSort=m; try{localStorage.setItem('fp_worklist_sort',m);}catch(e){} renderWorklist(); }
 
-function txHandled(t){ return t.approved===true || t.catManual===true; }
+function txHandled(t){
+  if(t.approved===true || t.catManual===true) return true;
+  // "always classify" supplier → auto-handled, EXCEPT keep duplicates visible as a safety net
+  if(trustedSuppliers[txSupplier(t)] && !txIsRepeat(t)) return true;
+  return false;
+}
 function _daysApart(a,b){ if(!a||!b) return 999; return Math.abs(Math.round((new Date(a)-new Date(b))/86400000)); }
 function txIsRepeat(t){
   const sup=txSupplier(t), amt=Math.abs(t.amount||0);
@@ -1735,7 +1747,10 @@ function renderWorklist(transferIds){
         <div class="tx-meta">${t.date||''}${acc?' · '+escHtml(acc.name):''}</div>
       </div>
       <div class="tx-amount ${isInc?'credit':'debit'}" style="margin-inline-start:4px;">${isInc?'+':'−'} ${fmtAmount(t.amount)}</div>
-      <button class="wl-approve" onclick="approveTx('${t.id}',event)">✓ אשר</button>
+      <div class="wl-actions">
+        <button class="wl-approve" onclick="approveTx('${t.id}',event)">✓ אשר</button>
+        <button class="wl-trust" onclick="trustSupplier('${t.id}',event)">📌 מיין תמיד</button>
+      </div>
     </div>`;
   }).join('') + (all.length>cap?`<div class="tx-meta" style="text-align:center;padding:10px;">מוצגות ${cap} מתוך ${all.length} — אשר/מיין כדי לצמצם</div>`:'');
 }
@@ -1747,6 +1762,28 @@ function approveTx(id, ev){
   if(document.getElementById('screen-reconcile')?.classList.contains('active')) renderReconcile();
   showToast('✅ ההתאמה אושרה');
 }
+// "Always classify payments from this supplier to this category" — sets a learned rule for existing
+// + future transactions, and trusts the supplier so future ones skip the worklist automatically.
+function trustSupplier(id, ev){
+  if(ev&&ev.stopPropagation) ev.stopPropagation();
+  const t=transactions.find(x=>x.id===id); if(!t) return;
+  const sup=txSupplier(t); const catId=t.category; const inc=isIncomeCat(catId);
+  // remember this category for the whole supplier (existing rows + future uploads)
+  transactions.forEach(x=>{
+    if(txSupplier(x)===sup){
+      if(inc){ if((x.amount||0)>0){ x.category=catId; x.catManual=true; incomeOverrides[merchantName(x.desc)]=catId; } }
+      else   { if((x.amount||0)<0){ x.category=catId; x.catManual=true; merchantOverrides[merchantName(x.desc)]=catId; } }
+    }
+  });
+  trustedSuppliers[sup]=true;
+  saveTx();
+  renderWorklist();
+  if(document.getElementById('screen-reconcile')?.classList.contains('active')) renderReconcile();
+  if(document.getElementById('screen-reports')?.classList.contains('active')) renderReports();
+  const catName=(getCatMeta(catId)||{}).name||'';
+  showToast(`✓ מעכשיו תשלומים מ"${sup}" יסווגו אוטומטית ל"${catName}" גם בפעמים הבאות`);
+}
+function trustFromEditor(){ const id=txEditId; closeTxEdit(); trustSupplier(id); }
 
 function renderAccountSection(containerId, type){
   const container=document.getElementById(containerId);
@@ -2395,7 +2432,7 @@ async function confirmUpload(fileId){
   uploadedFiles.push({fileId:pf.fileId,accountKey:pf.assignedKey,dateRange:dr,coveredMonths:covered,txCount:toAdd.length,fileName:pf.file.name,summary:result.summary||{}});
 
   toAdd.forEach((t,i)=>{
-    transactions.push({id:pf.fileId+'_'+i,accountKey:pf.assignedKey,date:t.date||dr.from+'-01',desc:t.desc||'פעולה',amount:t.amount||0,balance:t.balance||null,category:((t.amount||0)>0?((t.incomeType&&BASE_INCOME_META[t.incomeType])?t.incomeType:categorize(t.desc||'',t.amount||0)):categorize(t.desc||'',t.amount||0)),source:pf.file.name});
+    transactions.push({id:pf.fileId+'_'+i,accountKey:pf.assignedKey,date:t.date||dr.from+'-01',desc:t.desc||'פעולה',amount:t.amount||0,balance:t.balance||null,category:classifyTx(t.desc,t.amount,t.incomeType),source:pf.file.name});
   });
 
   // Add adjustment row if user provided one (from unresolved balance gap)
@@ -2489,6 +2526,17 @@ function resolveAndSave(fileId){
   confirmUpload(fileId);
 }
 
+// Single entry point for classifying a freshly-parsed transaction at upload time.
+// Income now mirrors expenses: a learned override (incomeOverrides) wins over the AI's incomeType.
+function classifyTx(desc, amount, incomeType){
+  if((amount||0)>0){
+    const mn=merchantName(desc||'');
+    if(incomeOverrides[mn]) return incomeOverrides[mn];                 // 1) learned rule wins
+    if(incomeType && BASE_INCOME_META[incomeType]) return incomeType;   // 2) AI suggestion
+    return categorizeIncome((desc||'').toLowerCase());                  // 3) keyword fallback
+  }
+  return categorize(desc||'', amount||0); // expense path already checks merchantOverrides first
+}
 function categorize(desc, amount){
   const d=(desc||'').toLowerCase();
   const mn=merchantName(desc);
@@ -3022,6 +3070,7 @@ function renderTxEditBody(){
     </div>
     ${catSection}
     <button class="modal-ok" style="width:100%;margin-top:10px;background:var(--green-dim);color:var(--green);border:1px solid var(--green-glow);" onclick="approveFromEditor()">✓ אשר התאמה</button>
+    <button class="modal-ok" style="width:100%;margin-top:8px;background:var(--blue-dim);color:var(--blue);border:1px solid var(--blue-glow);font-size:13px;" onclick="trustFromEditor()">📌 מיין תשלומים מ"${escHtml(sup)}" ל"${escHtml(cat.name||'')}" גם בפעמים הבאות</button>
     <button class="modal-cancel" style="width:100%;margin-top:8px;" onclick="closeTxEdit()">סגור</button>`;
 }
 function approveFromEditor(){ const id=txEditId; closeTxEdit(); approveTx(id); }
@@ -4099,7 +4148,7 @@ async function saveToCloud(){
         updatedAt: Date.now()
       });
       await setDoc(doc(db,'users',uid,'data','transactions'), {
-        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, catMetaOverrides, notesArchive, transferLinks, transferUnlinked, gapExplanations,
+        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, catMetaOverrides, notesArchive, transferLinks, transferUnlinked, gapExplanations, trustedSuppliers,
         updatedAt: Date.now()
       });
       setSyncStatus('synced');
@@ -4150,6 +4199,7 @@ async function loadFromCloud(uid){
           transferLinks = d.transferLinks||[];
           transferUnlinked = d.transferUnlinked||[];
           gapExplanations = d.gapExplanations||{};
+          trustedSuppliers = d.trustedSuppliers||{};
           migrateIncomeCategories();
           reconcileSignsFromBalance();
           detectInternalTransfers();
