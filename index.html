@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.22";
+const APP_VERSION = "2.26";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -225,6 +225,8 @@ button{cursor:pointer;}
 .rec-back{background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text2);font-size:13px;font-weight:700;padding:7px 12px;cursor:pointer;}
 .rec-title{font-size:18px;font-weight:800;}
 .rec-sub{font-size:12px;color:var(--text3);margin-top:2px;}
+#screen-cardresolve{padding-top:calc(env(safe-area-inset-top,0px) + var(--userbar-h));}
+.cardres-sec{font-size:13px;font-weight:800;color:var(--text2);padding:14px 4px 8px;}
 .rec-toolbar{display:flex;gap:8px;padding:2px 16px 4px;flex-wrap:wrap;}
 .rec-chip{flex:1;min-width:80px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:5px 8px;text-align:center;}
 .rec-chip .n{font-size:13px;font-weight:800;}
@@ -699,6 +701,23 @@ button{cursor:pointer;}
   </div>
 </div>
 
+<!-- ═══ CARD RESOLUTION SCREEN ═══ -->
+<div class="screen" id="screen-cardresolve">
+  <div class="rec-sticky">
+    <div class="rec-head">
+      <button class="rec-back" onclick="showDashboard()">→ חזרה</button>
+      <div><div class="rec-title">טיפול בחיובי אשראי</div><div class="rec-sub" id="cardresolve-sub"></div></div>
+    </div>
+  </div>
+  <div style="padding:4px 16px 16px;" id="cardresolve-body"></div>
+  <div class="bottom-nav">
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
+    <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
+    <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
+    <div class="nav-item" onclick="showSettings()"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
+  </div>
+</div>
+
 <!-- ═══ AUTH SCREEN ═══ -->
 <div class="screen" id="screen-auth" style="display:none;align-items:center;justify-content:center;">
   <div id="auth-content">
@@ -1145,12 +1164,20 @@ let gapExplanations = {};
 // We match each bank charge to a card's monthly statement so it is NOT double-counted:
 //   matched   → bank charge EXCLUDED from totals; the card's itemized lines are what count.
 //   unmatched → bank charge STILL counted, under the "חיובי אשראי לא ממוינים" category, and listed for clarification.
-// cardChargeMatches: [{bankTxId, cardKey, month:'YYYY-MM', auto:bool}]
+// cardChargeMatches: [{bankTxId, cardKey, settleDate, settleAmount, fileId, grouped?, manual?, auto?}]
 let cardChargeMatches = [];
 // cardChargeUnmatched: [bankTxId, ...] — charges the user explicitly un-matched (auto-detect won't re-suggest)
 let cardChargeUnmatched = [];
-const CARD_MATCH_TOLERANCE = 2;        // ₪ tolerance between a bank charge and a card statement net total
-const CARD_MATCH_MAX_MONTHS_BACK = 2;  // how far back the statement month may be vs. the charge month
+// cardChargeManual: {bankTxId: cardKey} — user manually linked a bank charge to a card (forces a match)
+let cardChargeManual = {};
+// cardChargeResolved: [bankTxId, ...] — user decided "this is a plain expense/income" (counted, closed, off the worklist)
+let cardChargeResolved = [];
+// cardSettlementResolved: [settlementId, ...] — settlement lines (card side) the user marked handled
+let cardSettlementResolved = [];
+// computed each detect run: settlement lines that found no matching bank transaction
+let unmatchedSettlements = [];
+const CARD_MATCH_TOLERANCE = 2;        // ₪ tolerance between a bank charge and a card settlement line (covers agorot/rounding)
+const CARD_MATCH_DAYS_WINDOW = 4;      // max days between the bank debit date and the statement settlement date
 // description keywords that identify a bank line as a credit-card charge
 const CARD_CHARGE_RE = /מקס|max|ויזה|visa|כ\.?א\.?ל|cal|ישראכרט|ישראכארט|isracard|מסטרקארד|מאסטרקארד|mastercard|דיינרס|diners|אמריקן|אמקס|amex|כרטיס אשראי|כרטיסי אשראי|לאומי קארד/i;
 
@@ -1193,7 +1220,7 @@ function loadState() {
     return true;
   }catch(e){return false;}
 }
-function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,customIncomeCats,catMetaOverrides,notesArchive,transferLinks,transferUnlinked,gapExplanations,trustedSuppliers,cardChargeMatches,cardChargeUnmatched}));}catch(e){}}
+function saveTx(){try{localStorage.setItem(TRANSACTIONS_KEY,JSON.stringify({transactions,uploadedFiles,customCategories,merchantOverrides,supplierOverrides,incomeOverrides,customIncomeCats,catMetaOverrides,notesArchive,transferLinks,transferUnlinked,gapExplanations,trustedSuppliers,cardChargeMatches,cardChargeUnmatched,cardChargeManual,cardChargeResolved,cardSettlementResolved}));}catch(e){}}
 function loadTx(){
   try{
     const raw=localStorage.getItem(TRANSACTIONS_KEY);
@@ -1214,6 +1241,9 @@ function loadTx(){
     trustedSuppliers=d.trustedSuppliers||{};
     cardChargeMatches=d.cardChargeMatches||[];
     cardChargeUnmatched=d.cardChargeUnmatched||[];
+    cardChargeManual=d.cardChargeManual||{};
+    cardChargeResolved=d.cardChargeResolved||[];
+    cardSettlementResolved=d.cardSettlementResolved||[];
     migrateIncomeCategories();
     reconcileSignsFromBalance();
     detectInternalTransfers();
@@ -1341,14 +1371,14 @@ function _monthsApart(a,b){ // 'YYYY-MM'
   return Math.abs((+pb[0]*12 + +pb[1]) - (+pa[0]*12 + +pa[1]));
 }
 function ymLabel(m){ const p=(m||'').split('-'); if(p.length<2) return m||''; return (MONTHS_HE[parseInt(p[1])-1]||p[1])+' '+p[0]; }
-// Is this transaction a bank "lump-sum" credit-card charge? (bank account, expense, card-company description)
-function isBankCardCharge(t, bankKeys){
-  if(!t || (t.amount||0) >= 0 || t.isAdjustment) return false;
+// Is this transaction a bank credit-card movement? (bank account, card-company desc, either sign)
+function isBankCardTx(t, bankKeys){
+  if(!t || !(t.amount) || t.isAdjustment) return false;
   const bk = bankKeys || _bankKeySet();
   if(!bk.has(t.accountKey)) return false;
   return t.category==='credit' || CARD_CHARGE_RE.test(t.desc||'');
 }
-// Set of bank-charge tx ids that are matched to a card statement (and whose bank tx still exists)
+// Set of bank tx ids that are matched to a settlement (auto or manual) and whose bank tx still exists
 function getMatchedCardChargeIds(){
   const byId={}; transactions.forEach(t=>byId[t.id]=t);
   const s=new Set();
@@ -1361,82 +1391,180 @@ function getExcludedTxIds(){
   getMatchedCardChargeIds().forEach(id=>s.add(id));
   return s;
 }
-// Effective (display) category — unmatched bank card charges bucket under "חיובי אשראי לא ממוינים"
+// Effective (display) category:
+//  matched → excluded elsewhere · resolved → real category · unmatched → "לא ממוינים" bucket (debit/credit)
 function effCat(t, bankKeys, matchedIds){
-  if((t.amount||0)<0 && isBankCardCharge(t,bankKeys) && !(matchedIds||getMatchedCardChargeIds()).has(t.id)) return 'credit_unmatched';
-  return t.category || ((t.amount||0)>0?'inc_other':'other');
+  const real = t.category || ((t.amount||0)>0?'inc_other':'other');
+  if(!isBankCardTx(t,bankKeys)) return real;
+  if((cardChargeResolved||[]).includes(t.id)) return real;
+  if((matchedIds||getMatchedCardChargeIds()).has(t.id)) return real; // matched → excluded anyway
+  return (t.amount||0)<0 ? 'credit_unmatched' : 'inc_credit_unmatched';
 }
 // Idempotent: keeps valid matches, drops stale/rejected ones, adds new auto-matches
+// Days between two 'YYYY-MM-DD' dates (abs)
+function _daysApart(a,b){
+  const da=Date.parse(a), db=Date.parse(b);
+  if(isNaN(da)||isNaN(db)) return 9999;
+  return Math.abs(Math.round((db-da)/86400000));
+}
+// Collect every settlement line across uploaded card files. amount is SIGNED:
+// positive = charged to the bank (a debit will appear), negative = credited to the bank (a credit will appear).
+function _collectSettlements(cardKeysSet){
+  const out=[]; // {cardKey, date, amount(signed), fileId, sid, used}
+  (uploadedFiles||[]).forEach(f=>{
+    if(!cardKeysSet.has(f.accountKey)) return;
+    (f.chargeSummaries||[]).forEach((s,i)=>{
+      const amt=Number(s.amount)||0;
+      if(!s.date || amt===0) return;
+      out.push({cardKey:f.accountKey, date:s.date, amount:amt, fileId:f.fileId, sid:f.fileId+'_s'+i, used:false});
+    });
+  });
+  return out;
+}
+// Match each bank card movement to a settlement line by sign(opposite)+amount(±tol)+date(±window).
+// Bank debit(−) ↔ settlement charge(+) · bank credit(+) ↔ settlement credit(−).
+// Rebuilt from scratch each run; respects manual links, manual un-matches, and resolved items.
 function detectCardChargeMatches(){
   const byId={}; transactions.forEach(t=>byId[t.id]=t);
   const cardKeys=new Set(getAllAccounts().filter(a=>a.type==='card').map(a=>a.key));
-  // prune matches whose bank tx no longer exists or whose card account is gone
-  cardChargeMatches = (cardChargeMatches||[]).filter(m=> byId[m.bankTxId] && cardKeys.has(m.cardKey));
-  const matchedBankIds=new Set(cardChargeMatches.map(m=>m.bankTxId));
-  const usedCardMonth=new Set(cardChargeMatches.map(m=>m.cardKey+'|'+m.month));
   const rejected=new Set(cardChargeUnmatched||[]);
+  const resolved=new Set(cardChargeResolved||[]);
   const bankKeys=_bankKeySet();
+  cardChargeMatches=[];                       // rebuild
 
-  // Per-card monthly NET (purchases minus refunds) of the uploaded statement lines
-  const cardMonth={};
-  transactions.forEach(t=>{
-    if(!cardKeys.has(t.accountKey) || t.isAdjustment) return;
-    const m=(t.date||'').slice(0,7); if(!m) return;
-    cardMonth[t.accountKey]=cardMonth[t.accountKey]||{};
-    const slot=cardMonth[t.accountKey][m]=cardMonth[t.accountKey][m]||{net:0,n:0};
-    slot.net+=(t.amount||0); slot.n++;
+  const settlements=_collectSettlements(cardKeys);
+
+  // 0) Manual links first — user said "this bank charge belongs to this card"
+  Object.entries(cardChargeManual||{}).forEach(([bankTxId,cardKey])=>{
+    const bt=byId[bankTxId]; if(!bt || !cardKeys.has(cardKey)) return;
+    const amt=Math.abs(bt.amount||0);
+    // try to consume a same-card settlement of the right sign so the reverse list stays accurate
+    let pick=null;
+    settlements.forEach(s=>{ if(s.used||s.cardKey!==cardKey) return;
+      if(Math.sign(s.amount)!==-Math.sign(bt.amount)) return;
+      const g=Math.abs(Math.abs(s.amount)-amt); if(g>CARD_MATCH_TOLERANCE) return;
+      if(!pick||g<pick.g) pick={s,g}; });
+    if(pick) pick.s.used=true;
+    cardChargeMatches.push({bankTxId, cardKey, settleDate:pick?pick.s.date:(bt.date||null), settleAmount:pick?Math.abs(pick.s.amount):amt, fileId:pick?pick.s.fileId:null, manual:true});
   });
 
   // bank -> [card keys linked to it] (from settings)
   const banksLinkedCards={};
   Object.entries(state.cardBankLinks||{}).forEach(([ck,bk])=>{ (banksLinkedCards[bk]=banksLinkedCards[bk]||[]).push(ck); });
 
-  // candidate bank charges, oldest first
-  const charges=transactions
-    .filter(t=>isBankCardCharge(t,bankKeys) && !matchedBankIds.has(t.id) && !rejected.has(t.id))
+  const alreadyMatched=new Set(cardChargeMatches.map(m=>m.bankTxId));
+  // candidate bank movements (both signs), oldest first, skipping rejected/resolved/manual
+  const movements=transactions
+    .filter(t=>isBankCardTx(t,bankKeys) && !rejected.has(t.id) && !resolved.has(t.id) && !alreadyMatched.has(t.id))
     .sort((a,b)=>(a.date||'').localeCompare(b.date||''));
 
-  charges.forEach(ch=>{
-    const chMonth=(ch.date||'').slice(0,7); if(!chMonth) return;
+  movements.forEach(ch=>{
+    if(!ch.date) return;
     const amt=Math.abs(ch.amount||0);
+    const needSign=-Math.sign(ch.amount||0);     // settlement sign that matches this movement
     let candidates = banksLinkedCards[ch.accountKey] || [];
-    if(candidates.length===0) candidates=[...cardKeys];   // no link for this bank → try any card
+    if(candidates.length===0) candidates=[...cardKeys];   // no link → try any card
+    const candSet=new Set(candidates);
+
+    // Pass 1 — single settlement line
     let best=null;
-    candidates.forEach(ck=>{
-      const months=cardMonth[ck]; if(!months) return;
-      Object.keys(months).forEach(m=>{
-        if(m>chMonth) return;                               // statement can't be after the charge
-        if(_monthsApart(m,chMonth)>CARD_MATCH_MAX_MONTHS_BACK) return;
-        if(usedCardMonth.has(ck+'|'+m)) return;
-        const slot=months[m];
-        if(slot.net>=0) return;                             // not a real charge month
-        const gap=Math.abs(Math.abs(slot.net)-amt);
-        if(gap>CARD_MATCH_TOLERANCE) return;
-        const dist=_monthsApart(m,chMonth);
-        if(!best || dist<best.dist || (dist===best.dist && gap<best.gap)) best={cardKey:ck,month:m,dist,gap};
-      });
+    settlements.forEach(s=>{
+      if(s.used || !candSet.has(s.cardKey)) return;
+      if(Math.sign(s.amount)!==needSign) return;
+      const dd=_daysApart(s.date, ch.date); if(dd>CARD_MATCH_DAYS_WINDOW) return;
+      const gap=Math.abs(Math.abs(s.amount)-amt); if(gap>CARD_MATCH_TOLERANCE) return;
+      if(!best || gap<best.gap || (gap===best.gap && dd<best.dd)) best={s, dd, gap};
     });
     if(best){
-      cardChargeMatches.push({bankTxId:ch.id, cardKey:best.cardKey, month:best.month, auto:true});
-      usedCardMonth.add(best.cardKey+'|'+best.month);
-      matchedBankIds.add(ch.id);
+      best.s.used=true;
+      cardChargeMatches.push({bankTxId:ch.id, cardKey:best.s.cardKey, settleDate:best.s.date, settleAmount:Math.abs(best.s.amount), fileId:best.s.fileId, auto:true});
+      return;
+    }
+
+    // Pass 2 — bank may post several same-day, same-sign settlements as one movement → match their sum
+    let best2=null;
+    candidates.forEach(ck=>{
+      const byDate={};
+      settlements.forEach(s=>{ if(!s.used && s.cardKey===ck && Math.sign(s.amount)===needSign && _daysApart(s.date,ch.date)<=CARD_MATCH_DAYS_WINDOW){ (byDate[s.date]=byDate[s.date]||[]).push(s); } });
+      Object.keys(byDate).forEach(d=>{
+        const grp=byDate[d]; if(grp.length<2) return;
+        const sum=grp.reduce((x,s)=>x+Math.abs(s.amount),0);
+        const gap=Math.abs(sum-amt); if(gap>CARD_MATCH_TOLERANCE) return;
+        const dd=_daysApart(d,ch.date);
+        if(!best2 || gap<best2.gap || (gap===best2.gap && dd<best2.dd)) best2={grp, sum, dd, gap, cardKey:ck, date:d};
+      });
+    });
+    if(best2){
+      best2.grp.forEach(s=>s.used=true);
+      cardChargeMatches.push({bankTxId:ch.id, cardKey:best2.cardKey, settleDate:best2.date, settleAmount:best2.sum, fileId:best2.grp[0].fileId, grouped:best2.grp.length, auto:true});
+    }
+  });
+
+  // Reverse direction: settlement lines that never matched a bank movement → "לבירור" (unless user dismissed)
+  const dismissed=new Set(cardSettlementResolved||[]);
+  unmatchedSettlements = settlements.filter(s=>!s.used && !dismissed.has(s.sid))
+    .map(s=>({cardKey:s.cardKey, date:s.date, amount:s.amount, sid:s.sid}));
+}
+// User un-matches a bank charge → returns to "לבירור"; remembered so auto won't re-suggest
+function unmatchCardCharge(bankTxId){
+  if(!cardChargeUnmatched.includes(bankTxId)) cardChargeUnmatched.push(bankTxId);
+  delete cardChargeManual[bankTxId];
+  cardChargeMatches=cardChargeMatches.filter(m=>m.bankTxId!==bankTxId);
+  detectCardChargeMatches();
+  saveTx();
+  rerenderCardScreens();
+  showToast('🔗 ההתאמה בוטלה — הפעולה חזרה לבירור');
+}
+// re-render whichever card-related screen is open
+function rerenderCardScreens(){
+  if(document.getElementById('screen-dashboard')?.classList.contains('active'))renderDashboard();
+  if(document.getElementById('screen-cardresolve')?.classList.contains('active'))renderCardResolve();
+}
+// ── Manual resolution actions (from the resolution screen) ──
+function linkChargeToCard(bankTxId){
+  const cards=getAllAccounts().filter(a=>a.type==='card');
+  if(!cards.length){ showToast('אין כרטיסים רשומים — הוסף כרטיס בהגדרות'); return; }
+  openPicker({
+    title:'קשר חיוב לכרטיס', sub:'בחר את הכרטיס שאליו שייך החיוב', icon:'💳', allowNew:false,
+    existing:cards.map(a=>({label:a.name, value:a.key, icon:a.icon||'💳'})),
+    onPick:(cardKey)=>{
+      cardChargeManual[bankTxId]=cardKey;
+      cardChargeUnmatched=cardChargeUnmatched.filter(id=>id!==bankTxId);
+      cardChargeResolved=cardChargeResolved.filter(id=>id!==bankTxId);
+      detectCardChargeMatches(); saveTx(); rerenderCardScreens();
+      showToast('🔗 החיוב קושר לכרטיס והוחרג מהסיכום');
     }
   });
 }
-// User un-matches a bank charge → it returns to being a counted "unsorted" expense; remembered so auto won't re-suggest
-function unmatchCardCharge(bankTxId){
-  if(!cardChargeUnmatched.includes(bankTxId)) cardChargeUnmatched.push(bankTxId);
-  cardChargeMatches=cardChargeMatches.filter(m=>m.bankTxId!==bankTxId);
-  saveTx();
-  if(document.getElementById('screen-dashboard')?.classList.contains('active'))renderDashboard();
-  showToast('🔗 ההתאמה בוטלה — החיוב חזר להוצאות (לא ממוין)');
+function resolveChargeAsExpense(bankTxId){
+  const bt=transactions.find(t=>t.id===bankTxId); if(!bt) return;
+  const isInc=(bt.amount||0)>0;
+  const word=isInc?'הכנסה':'הוצאה';
+  if(!confirm(`לסמן את הפעולה כ${word} רגילה?\n\nבטוח? ייתכן שהחיוב מורכב ממספר חיובים שונים — אם כן, עדיף להעלות את פירוט הכרטיס כדי לראות את הפירוט המלא.`)) return;
+  if(!cardChargeResolved.includes(bankTxId)) cardChargeResolved.push(bankTxId);
+  cardChargeUnmatched=cardChargeUnmatched.filter(id=>id!==bankTxId);
+  delete cardChargeManual[bankTxId];
+  detectCardChargeMatches(); saveTx(); rerenderCardScreens();
+  showToast(`✓ סומן כ${word} — נספר ונסגר`);
+}
+function resolveSettlement(sid){
+  if(!cardSettlementResolved.includes(sid)) cardSettlementResolved.push(sid);
+  detectCardChargeMatches(); saveTx(); rerenderCardScreens();
+  showToast('✓ שורת החיוב סומנה כטופלה');
+}
+function undoCardResolution(bankTxId){
+  cardChargeResolved=cardChargeResolved.filter(id=>id!==bankTxId);
+  cardChargeUnmatched=cardChargeUnmatched.filter(id=>id!==bankTxId);
+  delete cardChargeManual[bankTxId];
+  detectCardChargeMatches(); saveTx(); rerenderCardScreens();
+  showToast('↩️ הוחזר לבירור');
 }
 // Re-run auto detection (respects manual un-matches). "נקה התאמות ידניות" path clears rejections.
 function rescanCardMatches(clearRejections){
   if(clearRejections) cardChargeUnmatched=[];
   detectCardChargeMatches();
   saveTx();
-  if(document.getElementById('screen-dashboard')?.classList.contains('active'))renderDashboard();
+  rerenderCardScreens();
   showToast('🔄 סריקת התאמות חיובי האשראי הושלמה');
 }
 
@@ -1458,6 +1586,69 @@ function findOverlapConflicts(accountKey, newMonths){
   return out;
 }
 // ids of all transactions that belong to a given uploaded file
+// ═══════════════════════════
+//  ORIGINAL FILE STORAGE (local, IndexedDB) — stores the raw uploaded PDF/Excel/CSV on THIS device only
+// ═══════════════════════════
+const ORIGDB_NAME='fpFiles', ORIGDB_STORE='origFiles';
+let origFileKeys=new Set();   // in-memory set of fileIds that have a stored original (for synchronous rendering)
+function _idbOpen(){
+  return new Promise((res,rej)=>{
+    let req; try{ req=indexedDB.open(ORIGDB_NAME,1); }catch(e){ return rej(e); }
+    req.onupgradeneeded=()=>{ const db=req.result; if(!db.objectStoreNames.contains(ORIGDB_STORE)) db.createObjectStore(ORIGDB_STORE,{keyPath:'fileId'}); };
+    req.onsuccess=()=>res(req.result);
+    req.onerror=()=>rej(req.error);
+  });
+}
+function idbSaveFile(fileId,name,type,blob){
+  return _idbOpen().then(db=>new Promise((res,rej)=>{
+    const tx=db.transaction(ORIGDB_STORE,'readwrite');
+    tx.objectStore(ORIGDB_STORE).put({fileId,name,type,blob});
+    tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error);
+  }));
+}
+function idbGetFile(fileId){
+  return _idbOpen().then(db=>new Promise((res,rej)=>{
+    const r=db.transaction(ORIGDB_STORE,'readonly').objectStore(ORIGDB_STORE).get(fileId);
+    r.onsuccess=()=>res(r.result||null); r.onerror=()=>rej(r.error);
+  }));
+}
+function idbDeleteFile(fileId){
+  return _idbOpen().then(db=>new Promise((res)=>{
+    const tx=db.transaction(ORIGDB_STORE,'readwrite');
+    tx.objectStore(ORIGDB_STORE).delete(fileId);
+    tx.oncomplete=()=>res(true); tx.onerror=()=>res(false);
+  })).catch(()=>false);
+}
+function idbClearAll(){
+  return _idbOpen().then(db=>new Promise((res)=>{
+    const tx=db.transaction(ORIGDB_STORE,'readwrite');
+    tx.objectStore(ORIGDB_STORE).clear();
+    tx.oncomplete=()=>res(true); tx.onerror=()=>res(false);
+  })).catch(()=>false);
+}
+function refreshOrigFileKeys(){
+  return _idbOpen().then(db=>new Promise((res)=>{
+    const r=db.transaction(ORIGDB_STORE,'readonly').objectStore(ORIGDB_STORE).getAllKeys();
+    r.onsuccess=()=>{ origFileKeys=new Set(r.result||[]); res(origFileKeys); };
+    r.onerror=()=>res(origFileKeys);
+  })).catch(()=>origFileKeys);
+}
+// Open the stored original file. PDF → new tab (opened synchronously to survive popup blockers); others → download.
+function viewOriginalFile(fileId){
+  const f=uploadedFiles.find(x=>x.fileId===fileId);
+  const name=(f&&f.fileName)||'file';
+  const isPdf=/\.pdf$/i.test(name);
+  let win=null;
+  if(isPdf) win=window.open('','_blank');   // must open during the click gesture
+  idbGetFile(fileId).then(rec=>{
+    if(!rec||!rec.blob){ if(win)win.close(); origFileKeys.delete(fileId); showToast('הקובץ המקורי לא נמצא במכשיר זה'); renderUploadedFiles(); return; }
+    const url=URL.createObjectURL(rec.blob);
+    if(isPdf){ if(win){win.location.href=url;} else {window.open(url,'_blank');} }
+    else { const a=document.createElement('a'); a.href=url; a.download=rec.name||name; document.body.appendChild(a); a.click(); a.remove(); showToast('⬇️ הקובץ יורד למכשיר'); }
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }).catch(()=>{ if(win)win.close(); showToast('שגיאה בטעינת הקובץ'); });
+}
+
 function txIdsOfFile(fileId){
   const pre=fileId+'_';
   return transactions.filter(t=>t.id&&(t.id===fileId||t.id.startsWith(pre))).map(t=>t.id);
@@ -1469,6 +1660,8 @@ function deleteUploadedFile(fileId){
   transactions=transactions.filter(t=>!removed.has(t.id));
   transferLinks=transferLinks.filter(l=>!removed.has(l.a)&&!removed.has(l.b));
   cardChargeMatches=cardChargeMatches.filter(m=>!removed.has(m.bankTxId));
+  origFileKeys.delete(fileId);
+  idbDeleteFile(fileId);
   detectInternalTransfers();
   detectCardChargeMatches();
   saveTx();
@@ -1501,13 +1694,20 @@ function renderUploadedFiles(){
     const months=fileCoveredMonths(f);
     const label=months.length?(months.length>1?months[0]+' – '+months[months.length-1]:months[0]):((f.dateRange&&f.dateRange.from)||'');
     const cnt=txIdsOfFile(f.fileId).length;
+    const hasOrig=origFileKeys.has(f.fileId);
+    const viewBtn = hasOrig
+      ? `<button onclick="viewOriginalFile('${f.fileId}')" style="background:var(--blue-dim);border:1px solid var(--blue);color:var(--blue);font-family:'Heebo';font-size:12px;padding:5px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;">👁️ הצג</button>`
+      : `<span style="font-size:10px;color:var(--text3);white-space:nowrap;align-self:center;">הקובץ לא נשמר במכשיר זה</span>`;
     return `<div class="settings-row">
       <div class="settings-row-header" style="align-items:flex-start;gap:8px;">
         <div style="min-width:0;flex:1;">
           <div class="settings-row-name" style="font-size:13px;">${escHtml(accName(f.accountKey))}</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px;">🗓️ ${escHtml(label)} · ${cnt} פעולות${f.fileName?' · '+escHtml(f.fileName):''}</div>
         </div>
-        <button onclick="confirmDeleteFile('${f.fileId}')" style="background:var(--red-dim);border:1px solid var(--red);color:var(--red);font-family:'Heebo';font-size:12px;padding:5px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;">🗑️ מחק</button>
+        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;">
+          ${viewBtn}
+          <button onclick="confirmDeleteFile('${f.fileId}')" style="background:var(--red-dim);border:1px solid var(--red);color:var(--red);font-family:'Heebo';font-size:12px;padding:5px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;">🗑️ מחק</button>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -1840,7 +2040,7 @@ function txIsSuspect(t){
 function buildWorklist(transferIds){
   const tIds = transferIds || new Set();
   const bankKeys=_bankKeySet();
-  return transactions.filter(t=> !txHandled(t) && Math.abs(t.amount||0) > WORKLIST_MIN && !tIds.has(t.id) && !isBankCardCharge(t,bankKeys));
+  return transactions.filter(t=> !txHandled(t) && Math.abs(t.amount||0) > WORKLIST_MIN && !tIds.has(t.id) && !isBankCardTx(t,bankKeys));
 }
 function sortWorklist(list){
   const a=[...list];
@@ -2247,6 +2447,9 @@ ${contentForAI}
   "cardChargesInBank": [
     {"date":"YYYY-MM-DD","cardName":"שם הכרטיס שחויב","amount":מספר חיובי}
   ],
+  "chargeSummaries": [
+    {"date":"YYYY-MM-DD","amount":מספר חיובי}
+  ],
   "transactions": [
     {
       "date": "YYYY-MM-DD",
@@ -2272,6 +2475,7 @@ ${contentForAI}
 4. אם detectedLast4 מופיע בחשבון רשום — התאם confidence=high
 5. openingBalance = היתרה לפני הפעולה הראשונה; closingBalance = היתרה אחרי הפעולה האחרונה
 6. cardChargesInBank = רק אם זה דף בנק: כל החיובים שנראים כחיוב כרטיס אשראי (ויזה/מאסטרקארד/ישראכרט/מקס/כאל/דיינרס/אמקס), כולל חיובי חו"ל נפרדים
+6ב. chargeSummaries = רק אם זה דף כרטיס אשראי (card_statement): חלץ כל שורת סיכום שמציינת סכום שייגבה/יזוכה מחשבון הבנק בתאריך מסוים — בדף max אלה השורות "סה"כ חיוב לחשבון __ בתאריך DD/MM/YY : ____ ₪", ואצל מנפיקים אחרים שורות "סה"כ לחיוב/לתשלום/לזיכוי בתאריך". כל שורה כזו בנפרד, גם אם יש כמה באותו תאריך (חיובי חו"ל נגבים בנפרד מהחיוב החודשי). amount חיובי = חיוב לחשבון (יורד בבנק), amount שלילי = זיכוי לחשבון (נכנס לבנק). date = תאריך החיוב/הזיכוי לחשבון.
 7. החזר JSON תקין בלבד
 8. סימן הסכום קריטי: קבע אותו לפי עמודת זכות/חובה (זכות=חיובי, חובה=שלילי) ולפי כיוון היתרה המצטברת — אם היתרה עלתה זו הכנסה (חיובי), אם ירדה זו הוצאה (שלילי). תיאורים כמו "העברה דיגיטל"/"העברה" יכולים להיות גם הכנסה וגם הוצאה — אל תניח, הכרע לפי העמודה והיתרה`;
 
@@ -2333,6 +2537,7 @@ ${contentForAI}
     lastDate: parsed.lastDate || null,
     detectedLast4: parsed.detectedLast4 || null,
     cardChargesInBank: parsed.cardChargesInBank || [],
+    chargeSummaries: (parsed.chargeSummaries || []).filter(s=>s&&s.date&&Number(s.amount)),
     insights: parsed.insights || [],
     gaps: [],
     confidence: parsed.confidence || 'low',
@@ -2565,7 +2770,15 @@ async function confirmUpload(fileId){
     : (result.coveredMonths&&result.coveredMonths.length?result.coveredMonths:getMonthsBetween(dr.from,dr.to));
 
   const isFirstFile = uploadedFiles.filter(f=>f.accountKey===pf.assignedKey).length===0;
-  uploadedFiles.push({fileId:pf.fileId,accountKey:pf.assignedKey,dateRange:dr,coveredMonths:covered,txCount:toAdd.length,fileName:pf.file.name,summary:result.summary||{}});
+  uploadedFiles.push({fileId:pf.fileId,accountKey:pf.assignedKey,dateRange:dr,coveredMonths:covered,txCount:toAdd.length,fileName:pf.file.name,summary:result.summary||{},chargeSummaries:result.chargeSummaries||[]});
+
+  // Keep the original file locally (this device only) so the user can view it later
+  if(pf.file){
+    origFileKeys.add(pf.fileId);
+    idbSaveFile(pf.fileId, pf.file.name, pf.file.type, pf.file)
+      .then(()=>{ if(document.getElementById('screen-settings')?.classList.contains('active'))renderUploadedFiles(); })
+      .catch(()=>{ origFileKeys.delete(pf.fileId); });
+  }
 
   toAdd.forEach((t,i)=>{
     transactions.push({id:pf.fileId+'_'+i,accountKey:pf.assignedKey,date:t.date||dr.from+'-01',desc:t.desc||'פעולה',amount:t.amount||0,balance:t.balance||null,category:classifyTx(t.desc,t.amount,t.incomeType),source:pf.file.name});
@@ -2762,6 +2975,7 @@ const BASE_INCOME_META={
   inc_transfer:{name:'העברות נכנסות',icon:'🔄',color:'#2DD4BF'},
   inc_gift:{name:'מתנות ומענקים',icon:'🎁',color:'#F472B6'},
   inc_other:{name:'הכנסה אחרת',icon:'💰',color:'#94A3B8'},
+  inc_credit_unmatched:{name:'זיכויי אשראי לא ממוינים',icon:'💳',color:'#94A3B8'},
 };
 const INCOME_CAT_IDS=Object.keys(BASE_INCOME_META);
 function isIncomeCat(id){return !!id && (id.startsWith('inc_') || id==='salary');}
@@ -3908,50 +4122,55 @@ function renderTransfersSection(){
   host.innerHTML=rows;
 }
 
-// Render the "credit-card charge ↔ statement matching" section at the bottom of the data page
+// Helpers shared by dashboard summary and the resolution screen
+function getUnmatchedBankCardTx(){
+  const bankKeys=_bankKeySet();
+  const matchedIds=getMatchedCardChargeIds();
+  const resolved=new Set(cardChargeResolved||[]);
+  const out=transactions.filter(t=>isBankCardTx(t,bankKeys) && !matchedIds.has(t.id) && !resolved.has(t.id) && !t.isAdjustment)
+    .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  return {debits:out.filter(t=>(t.amount||0)<0), credits:out.filter(t=>(t.amount||0)>0)};
+}
+function getCardResolveCount(){
+  const {debits,credits}=getUnmatchedBankCardTx();
+  return debits.length+credits.length+(unmatchedSettlements||[]).length;
+}
+
+// Dashboard "credit-card matching" section: matched list + a button into the manual-resolution screen
 function renderCardMatchSection(){
   const host=document.getElementById('db-cardmatch'); if(!host)return;
   const headEl=document.getElementById('db-cardmatch-head');
   const byId={}; transactions.forEach(t=>byId[t.id]=t);
-  const bankKeys=_bankKeySet();
-  const matchedIds=getMatchedCardChargeIds();
-
-  // statement net + line count for a (card, month)
-  const stmtInfo=(cardKey,month)=>{
-    let net=0,n=0;
-    transactions.forEach(t=>{ if(t.accountKey===cardKey && (t.date||'').slice(0,7)===month && !t.isAdjustment){ net+=(t.amount||0); n++; } });
-    return {sum:Math.abs(net), n};
-  };
+  const fmtD=d=>{const p=(d||'').split('-');return p.length===3?`${p[2]}/${p[1]}`:(d||'');};
+  const acN=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?a.name:'חשבון';};
 
   const matched=(cardChargeMatches||[]).filter(m=>byId[m.bankTxId])
     .sort((a,b)=>((byId[b.bankTxId].date)||'').localeCompare((byId[a.bankTxId].date)||''));
-  const unmatched=transactions
-    .filter(t=>isBankCardCharge(t,bankKeys) && !matchedIds.has(t.id) && !t.isAdjustment)
-    .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-
+  const pending=getCardResolveCount();
   const totMatched=matched.reduce((s,m)=>s+Math.abs(byId[m.bankTxId].amount||0),0);
-  if(headEl) headEl.innerHTML = (matched.length||unmatched.length)
-    ? `💳 התאמות חיובי אשראי <span style="color:var(--text3);font-weight:500;font-size:12px;">(${matched.length} מותאמים · ${unmatched.length} לבירור)</span>`
+
+  if(headEl) headEl.innerHTML = (matched.length||pending)
+    ? `💳 התאמות חיובי אשראי <span style="color:var(--text3);font-weight:500;font-size:12px;">(${matched.length} מותאמים · ${pending} לבירור)</span>`
     : `💳 התאמות חיובי אשראי`;
 
-  if(!matched.length && !unmatched.length){
-    host.innerHTML=`<div class="empty-state" style="padding:14px;">לא זוהו חיובי כרטיס אשראי בבנק<br><span style="font-size:11px;color:var(--text3);">חיוב מרוכז בבנק יותאם אוטומטית לפירוט החודשי שתעלה</span><br><button class="reassign-new" style="margin-top:10px;display:inline-block;width:auto;padding:8px 16px;" onclick="rescanCardMatches()">🔄 סרוק מחדש</button></div>`;
+  if(!matched.length && !pending){
+    host.innerHTML=`<div class="empty-state" style="padding:14px;">לא זוהו חיובי כרטיס אשראי בבנק<br><span style="font-size:11px;color:var(--text3);">חיוב בבנק יותאם אוטומטית לשורת החיוב המתאימה בפירוט שתעלה</span><br><button class="reassign-new" style="margin-top:10px;display:inline-block;width:auto;padding:8px 16px;" onclick="rescanCardMatches()">🔄 סרוק מחדש</button></div>`;
     return;
   }
 
-  const acN=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?a.name:'חשבון';};
   let html='';
-
   if(matched.length){
-    html+=`<div style="font-size:12px;font-weight:700;color:var(--green);padding:4px 4px 6px;">✅ הותאמו לפירוט · מוחרגים מההוצאות</div>`;
+    html+=`<div style="font-size:12px;font-weight:700;color:var(--green);padding:4px 4px 6px;">✅ הותאמו לפירוט · מוחרגים מהסיכום</div>`;
     html+=matched.map(m=>{
-      const bt=byId[m.bankTxId]; const info=stmtInfo(m.cardKey,m.month);
-      const diff=Math.round((Math.abs(bt.amount||0)-info.sum)*100)/100;
+      const bt=byId[m.bankTxId];
+      const diff=Math.round((Math.abs(bt.amount||0)-(m.settleAmount||0))*100)/100;
+      const tag=m.manual?' · ידני':'';
+      const stLabel = m.settleDate ? `סליקה ${fmtD(m.settleDate)}${m.grouped?` (${m.grouped} שורות)`:''}` : 'פירוט';
       return `<div class="tx-row" style="align-items:center;">
         <div class="tx-icon-wrap" style="background:var(--surface3)">💳</div>
         <div style="min-width:0;flex:1;">
           <div class="tx-name">${acN(bt.accountKey)} → ${acN(m.cardKey)}</div>
-          <div class="tx-meta">חיוב ${bt.date} · פירוט ${ymLabel(m.month)} (${info.n} פעולות)${Math.abs(diff)>=1?` · פער ${fmtAmount(diff)}`:''}</div>
+          <div class="tx-meta">חיוב ${bt.date} · ${stLabel}${tag}${Math.abs(diff)>=1?` · פער ${fmtAmount(diff)}`:''}</div>
         </div>
         <div style="text-align:left;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
           <div class="tx-amount" style="color:var(--text2)">${fmtAmount(bt.amount)}</div>
@@ -3959,29 +4178,130 @@ function renderCardMatchSection(){
         </div>
       </div>`;
     }).join('');
-  }
-
-  if(unmatched.length){
-    html+=`<div style="font-size:12px;font-weight:700;color:var(--amber);padding:10px 4px 6px;${matched.length?'border-top:1px solid var(--border);margin-top:6px;':''}">⚠️ חיובי אשראי לא מותאמים — לבירור</div>`;
-    html+=`<div style="font-size:11px;color:var(--text3);padding:0 4px 6px;">נספרים בהוצאות תחת "חיובי אשראי לא ממוינים". העלה את פירוט הכרטיס לחודש המתאים כדי שיותאמו אוטומטית.</div>`;
-    html+=unmatched.map(t=>`<div class="tx-row" style="align-items:center;">
-        <div class="tx-icon-wrap" style="background:var(--surface3)">💳</div>
-        <div style="min-width:0;flex:1;">
-          <div class="tx-name">${acN(t.accountKey)}</div>
-          <div class="tx-meta">${t.date}${t.desc?' · '+t.desc:''}</div>
-        </div>
-        <div class="tx-amount" style="color:var(--red)">${fmtAmount(t.amount)}</div>
-      </div>`).join('');
-  }
-
-  if(matched.length){
     html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 4px 2px;border-top:1px solid var(--border);margin-top:6px;">
-      <span style="font-size:12px;color:var(--text2);">סך חיובים שהותאמו: ${fmtAmount(totMatched)}</span>
-      <span style="font-size:13px;font-weight:700;color:var(--text2);">מוחרג מההוצאות</span>
+      <span style="font-size:12px;color:var(--text2);">סך שהותאם: ${fmtAmount(totMatched)}</span>
+      <span style="font-size:13px;font-weight:700;color:var(--text2);">מוחרג מהסיכום</span>
     </div>`;
+  }
+
+  if(pending){
+    html+=`<button onclick="showCardResolve()" style="width:100%;margin-top:${matched.length?'10':'0'}px;background:var(--amber-dim,rgba(245,158,11,.12));border:1px solid var(--amber);color:var(--amber);font-family:'Heebo';font-size:14px;font-weight:700;padding:12px;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">⚠️ ${pending} פריטים לבירור — לטיפול ידני ←</button>`;
   }
   html+=`<div style="text-align:center;margin-top:8px;"><button class="reassign-new" style="display:inline-block;width:auto;padding:6px 14px;font-size:12px;" onclick="rescanCardMatches()">🔄 סרוק מחדש</button></div>`;
   host.innerHTML=html;
+}
+
+// ── Manual resolution screen (separate screen, reached from the dashboard summary button) ──
+function showCardResolve(){ showScreen('screen-cardresolve'); renderCardResolve(); }
+// Coverage probes — used to tell a genuine mismatch from a "one side wasn't uploaded" case
+function _cardKeysForBank(bankKey){
+  const linked=Object.entries(state.cardBankLinks||{}).filter(([ck,bk])=>bk===bankKey).map(([ck])=>ck);
+  if(linked.length) return new Set(linked);
+  return new Set(getAllAccounts().filter(a=>a.type==='card').map(a=>a.key)); // no link → any card
+}
+function _bankKeysForCard(cardKey){
+  const bk=(state.cardBankLinks||{})[cardKey];
+  if(bk) return new Set([bk]);
+  return _bankKeySet(); // no link → any bank
+}
+// Is there card-statement detail uploaded near this bank charge's date?
+function _cardDetailPresent(bankTx){
+  const cardKeys=_cardKeysForBank(bankTx.accountKey);
+  return (uploadedFiles||[]).some(f=> cardKeys.has(f.accountKey) && (f.chargeSummaries||[]).some(s=> s.date && _daysApart(s.date, bankTx.date)<=31));
+}
+// Is there a bank statement uploaded covering this settlement's month?
+function _bankStatementPresent(settle){
+  const bankKeys=_bankKeysForCard(settle.cardKey);
+  const ym=(settle.date||'').slice(0,7);
+  return (uploadedFiles||[]).some(f=> bankKeys.has(f.accountKey) && fileCoveredMonths(f).includes(ym));
+}
+
+function renderCardResolve(){
+  const host=document.getElementById('cardresolve-body'); if(!host)return;
+  const fmtD=d=>{const p=(d||'').split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0].slice(2)}`:(d||'');};
+  const acN=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?(a.icon+' '+a.name):'חשבון';};
+  const {debits,credits}=getUnmatchedBankCardTx();
+  const byId={}; transactions.forEach(t=>byId[t.id]=t);
+
+  const bankRow=(t,kind,missingNote)=>{
+    const word = kind==='credit' ? 'הכנסה' : 'הוצאה';
+    const note = missingNote ? `<div class="tx-meta" style="color:var(--amber);">${missingNote}</div>` : '';
+    return `<div class="tx-card" style="margin-bottom:8px;padding:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div style="min-width:0;flex:1;">
+          <div class="tx-name">${escHtml(acN(t.accountKey))}</div>
+          <div class="tx-meta">${t.date}${t.desc?' · '+escHtml(t.desc):''}</div>${note}
+        </div>
+        <div class="tx-amount" style="color:${kind==='credit'?'var(--green)':'var(--red)'};white-space:nowrap;">${fmtAmount(t.amount)}</div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button onclick="linkChargeToCard('${t.id}')" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Heebo';font-size:13px;padding:8px;border-radius:8px;cursor:pointer;">🔗 קשר לכרטיס</button>
+        <button onclick="resolveChargeAsExpense('${t.id}')" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Heebo';font-size:13px;padding:8px;border-radius:8px;cursor:pointer;">➡️ הכרע כ${word}</button>
+      </div>
+    </div>`;
+  };
+  const settleRow=(s,missingNote)=>{
+    const note = missingNote ? `<div class="tx-meta" style="color:var(--amber);">${missingNote}</div>` : '';
+    return `<div class="tx-card" style="margin-bottom:8px;padding:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div style="min-width:0;flex:1;">
+          <div class="tx-name">${escHtml(acN(s.cardKey))}</div>
+          <div class="tx-meta">סליקה ${fmtD(s.date)} · ${s.amount<0?'זיכוי':'חיוב'} · לא נמצא בבנק</div>${note}
+        </div>
+        <div class="tx-amount" style="color:var(--text2);white-space:nowrap;">${fmtAmount(-s.amount)}</div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button onclick="resolveSettlement('${s.sid}')" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Heebo';font-size:13px;padding:8px;border-radius:8px;cursor:pointer;">✓ סמן כטופל</button>
+      </div>
+    </div>`;
+  };
+
+  // split each list: counterpart present (genuine mismatch) vs counterpart missing (likely missing upload)
+  const dR=[],dM=[]; debits.forEach(t=> (_cardDetailPresent(t)?dR:dM).push(t));
+  const cR=[],cM=[]; credits.forEach(t=> (_cardDetailPresent(t)?cR:cM).push(t));
+  const us=(unmatchedSettlements||[]).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const sR=[],sM=[]; us.forEach(s=> (_bankStatementPresent(s)?sR:sM).push(s));
+
+  let html='';
+  const sec=(title,color,n)=>`<div class="cardres-sec"${color?` style="color:${color};"`:''}>${title} · ${n}</div>`;
+
+  html+=sec('חיובי בנק לבירור (חובה)','',dR.length);
+  html += dR.length ? dR.map(t=>bankRow(t,'debit')).join('') : `<div class="empty-state" style="padding:10px;">אין חיובים לבירור</div>`;
+  html+=sec('זיכויי בנק לבירור (זכות)','var(--green)',cR.length);
+  html += cR.length ? cR.map(t=>bankRow(t,'credit')).join('') : `<div class="empty-state" style="padding:10px;">אין זיכויים לבירור</div>`;
+  html+=sec('שורות בפירוט שלא נמצאו בבנק','var(--amber)',sR.length);
+  html += sR.length ? sR.map(s=>settleRow(s)).join('') : `<div class="empty-state" style="padding:10px;">אין שורות פתוחות</div>`;
+
+  // Separate bottom table — items where one side simply wasn't uploaded
+  const missingCount=dM.length+cM.length+sM.length;
+  if(missingCount){
+    html+=`<div class="cardres-sec" style="color:var(--text3);border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">יתכן וחסרים נתונים · ${missingCount}</div>`;
+    html+=`<div style="font-size:11px;color:var(--text3);padding:0 4px 8px;line-height:1.5;">בהתאמות אלה צד אחד לא הועלה — חסר פירוט אשראי או דף בנק לתקופה — וייתכן שזו הסיבה לחוסר ההתאמה. השלמת הקובץ החסר אמורה לסגור אותן אוטומטית.</div>`;
+    html+=dM.map(t=>bankRow(t,'debit','חסר פירוט אשראי לתקופה')).join('');
+    html+=cM.map(t=>bankRow(t,'credit','חסר פירוט אשראי לתקופה')).join('');
+    html+=sM.map(s=>settleRow(s,'חסר דף בנק לתקופה')).join('');
+  }
+
+  // resolved / manual — undo
+  const manualIds=Object.keys(cardChargeManual||{}).filter(id=>byId[id]);
+  const resolvedIds=(cardChargeResolved||[]).filter(id=>byId[id]);
+  if(manualIds.length||resolvedIds.length){
+    html+=`<div class="cardres-sec" style="color:var(--text3);">הוכרעו ידנית · ${manualIds.length+resolvedIds.length}</div>`;
+    const rowDone=(id,label)=>{const t=byId[id];return `<div class="tx-row" style="align-items:center;">
+        <div class="tx-icon-wrap" style="background:var(--surface3)">💳</div>
+        <div style="min-width:0;flex:1;"><div class="tx-name">${escHtml(acN(t.accountKey))}</div>
+        <div class="tx-meta">${t.date} · ${label}</div></div>
+        <div style="text-align:left;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+          <div class="tx-amount" style="color:var(--text2)">${fmtAmount(t.amount)}</div>
+          <button onclick="undoCardResolution('${id}')" style="background:none;border:1px solid var(--border2);color:var(--text3);font-family:'Heebo';font-size:11px;padding:2px 8px;border-radius:6px;cursor:pointer;">↩️ החזר לבירור</button>
+        </div></div>`;};
+    html+=manualIds.map(id=>rowDone(id,'קושר לכרטיס')).join('');
+    html+=resolvedIds.map(id=>rowDone(id,'הוכרע כהוצאה/הכנסה')).join('');
+  }
+
+  html+=`<div style="text-align:center;margin:14px 0 4px;"><button class="reassign-new" style="display:inline-block;width:auto;padding:8px 16px;font-size:12px;" onclick="rescanCardMatches()">🔄 סרוק מחדש</button></div>`;
+  host.innerHTML=html;
+  const sub=document.getElementById('cardresolve-sub'); if(sub) sub.textContent=getCardResolveCount()+' פריטים פתוחים';
 }
 
 // ── Category drill-down ──
@@ -4268,6 +4588,7 @@ function resetSetup(){
   try{localStorage.removeItem(STORAGE_KEY);localStorage.removeItem(TRANSACTIONS_KEY);}catch(e){}
   state={currentStep:0,selectedBanks:new Set(),bankInstances:{},selectedCards:new Set(),cardInstances:{},startDate:'2026-01',reminder:'biweekly',setupDone:false,cardBankLinks:{},verifiedMonths:{},accountStarts:{}};
   transactions=[];uploadedFiles=[];pendingFiles=[];customCategories={};merchantOverrides={};supplierOverrides={};incomeOverrides={};customIncomeCats={};notesArchive=[];
+  cardChargeMatches=[];cardChargeUnmatched=[];cardChargeManual={};cardChargeResolved=[];cardSettlementResolved=[];unmatchedSettlements=[];origFileKeys=new Set();idbClearAll();
   initOnboarding();showScreen('screen-onboarding');
 }
 
@@ -4365,7 +4686,7 @@ async function saveToCloud(){
         updatedAt: Date.now()
       });
       await setDoc(doc(db,'users',uid,'data','transactions'), {
-        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, catMetaOverrides, notesArchive, transferLinks, transferUnlinked, gapExplanations, trustedSuppliers, cardChargeMatches, cardChargeUnmatched,
+        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, catMetaOverrides, notesArchive, transferLinks, transferUnlinked, gapExplanations, trustedSuppliers, cardChargeMatches, cardChargeUnmatched, cardChargeManual, cardChargeResolved, cardSettlementResolved,
         updatedAt: Date.now()
       });
       setSyncStatus('synced');
@@ -4419,6 +4740,9 @@ async function loadFromCloud(uid){
           trustedSuppliers = d.trustedSuppliers||{};
           cardChargeMatches = d.cardChargeMatches||[];
           cardChargeUnmatched = d.cardChargeUnmatched||[];
+          cardChargeManual = d.cardChargeManual||{};
+          cardChargeResolved = d.cardChargeResolved||[];
+          cardSettlementResolved = d.cardSettlementResolved||[];
           migrateIncomeCategories();
           reconcileSignsFromBalance();
           detectInternalTransfers();
@@ -4501,6 +4825,7 @@ function startAuthFlow(){
       const as=document.getElementById('screen-auth');
       if(as){ as.innerHTML='<div class="auth-loading"><div class="auth-spinner"></div><span>טוען נתונים...</span></div>'; as.style.display='flex'; }
       await loadFromCloud(user.uid).catch(()=>{});
+      refreshOrigFileKeys().then(()=>{ if(document.getElementById('screen-settings')?.classList.contains('active'))renderUploadedFiles(); });
       if(state.setupDone){ exitAuthTo(showDashboard); }
       else { exitAuthTo(()=>{ initOnboarding(); showScreen('screen-onboarding'); }); }
     } else {
