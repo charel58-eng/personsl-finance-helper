@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.27";
+const APP_VERSION = "2.28";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -568,6 +568,7 @@ button{cursor:pointer;}
 .sync-indicator{font-size:10px;color:var(--text3);display:flex;align-items:center;gap:4px;}
 .sync-dot{width:6px;height:6px;border-radius:50%;background:var(--green);}
 .sync-dot.syncing{background:var(--amber);animation:pulse 1s infinite;}
+.sync-dot.error{background:var(--red);}
 
 
 /* ── UPLOAD ACCOUNT PICKER ── */
@@ -2027,7 +2028,6 @@ function txHandled(t){
   if(trustedSuppliers[txSupplier(t)] && !txIsRepeat(t)) return true;
   return false;
 }
-function _daysApart(a,b){ if(!a||!b) return 999; return Math.abs(Math.round((new Date(a)-new Date(b))/86400000)); }
 function txIsRepeat(t){
   const sup=txSupplier(t), amt=Math.abs(t.amount||0);
   return transactions.some(x=> x.id!==t.id && Math.abs(x.amount||0)===amt && txSupplier(x)===sup && _daysApart(x.date,t.date)<=7);
@@ -2481,7 +2481,7 @@ ${contentForAI}
 
   const data = await callAnthropicProxy({
     model: 'claude-sonnet-4-6',
-    max_tokens: 8000,
+    max_tokens: 16000,
     messages: [{ role: 'user', content: prompt }]
   });
   // post-flight: אם המודל נחתך כי הגיע לתקרת הפלט — ה-JSON חלקי, התנועות נקטעו → "ארוך מדי"
@@ -2904,7 +2904,7 @@ function categorize(desc, amount){
   }
   if(/כלב|חתול|וטרינר|פטשופ|חיות מחמד|pet|אוכל לכלב|חתולים|כלבים/.test(d))return'pets';
   if(/סופר|מכולת|אוכל|מסעדה|קפה|פיצה|מזון|שופרסל|רמי לוי|ויקטורי|טיב טעם|מאפה|פלאפל|שווארמה|בורגר/.test(d))return'food';
-  if(/אוטובוס|רכבת|מונית|דלק|חניה|אובר|פז|דלק|סונול|רב קו|ביטוח רכב/.test(d))return'transport';
+  if(/אוטובוס|רכבת|מונית|דלק|חניה|אובר|פז|סונול|רב קו|ביטוח רכב/.test(d))return'transport';
   if(/בגד|נעל|קניות|חנות|זארה|קסטרו|fox|h&m|רנואר/.test(d))return'shopping';
   if(/קולנוע|בידור|ספורט|נטפליקס|ספוטיפיי|חדר כושר|יס|הוט|דיסני/.test(d))return'entertainment';
   if(/רופא|תרופה|בריאות|מרפאה|מכבי|כללית|מאוחדת|לאומית|בית מרקחת|סופרפארם/.test(d))return'health';
@@ -3168,14 +3168,25 @@ function reconcileSignsFromBalance(){
     const tx=transactions.filter(t=>t.accountKey===key && t.balance!=null && !t.isAdjustment);
     if(tx.length<2) return;
     const afterSet=new Set(tx.map(t=>cents(t.balance))); // all recorded balances (authoritative)
+    // The earliest-dated transaction's "before" balance is the opening balance, which is
+    // legitimately NOT in afterSet — so it would always look "orphaned". Excluding it (and
+    // anything sharing that earliest date) prevents a coincidental flipped-match from wrongly
+    // inverting the opening row's sign.
+    const earliest=tx.reduce((m,t)=>(!m||(t.date||'')<(m.date||''))?t:m, null);
+    const earliestDate=earliest?earliest.date:null;
     tx.forEach(t=>{
       if(!t.amount) return;
+      if(earliestDate && (t.date||'')===earliestDate) return; // don't touch the opening day
       const before=cents(t.balance - t.amount);   // implied previous balance with current sign
       const flipped=cents(t.balance + t.amount);   // implied previous balance if the sign were flipped
       if(!afterSet.has(before) && afterSet.has(flipped)){
+        const wasManual=t.catManual===true;
         t.amount=-t.amount; // sign contradicts the balance chain → correct it
+        // Sign flip crosses the income/expense boundary, so the old category is in the wrong
+        // namespace and must be re-derived. We do NOT clear catManual — if the user had set it,
+        // we keep the row flagged as user-touched so the worklist doesn't resurface it.
         t.category = t.amount>0 ? categorizeIncome((t.desc||'').toLowerCase()) : categorize(t.desc||'', t.amount);
-        t.catManual=false;
+        if(!wasManual) t.catManual=false;
         fixed++;
       }
     });
@@ -4623,6 +4634,10 @@ document.addEventListener('click',function h(){
 // ── Firebase Auth Integration ──
 let currentUser = null;
 let unsubscribeFirestore = null;
+// SAFETY: becomes true only after we have successfully read the user's cloud document
+// (even if it was empty/new). saveToCloud refuses to write while this is false, so a
+// failed/slow cloud load can never overwrite real cloud data with an empty in-memory state.
+let cloudLoaded = false;
 
 function waitForFB(cb){
   if(window._fbReady) cb();
@@ -4662,36 +4677,41 @@ function setSyncStatus(status){
   const txt = document.getElementById('sync-text');
   if(!dot||!txt) return;
   if(status==='syncing'){dot.className='sync-dot syncing';txt.textContent='שומר...';}
+  else if(status==='error'){dot.className='sync-dot error';txt.textContent='לא מסונכרן';}
   else{dot.className='sync-dot';txt.textContent='מסונכרן';}
 }
 
 async function saveToCloud(){
   if(!currentUser) return;
+  // SAFETY GUARD: never overwrite the cloud until we have confirmed what's in it.
+  // Without this, a failed/slow load (empty in-memory state) would clobber real data.
+  if(!cloudLoaded){ console.warn('saveToCloud skipped — cloud not loaded yet (local save kept)'); return; }
+  if(!window._fb){ return; }
   setSyncStatus('syncing');
+  // NOTE: the awaits MUST live in this async function body (not inside a waitForFB
+  // callback) so that a setDoc rejection is actually caught here and the status updates.
   try {
-    waitForFB(async ()=>{
-      const {db, doc, setDoc} = window._fb;
-      const uid = currentUser.uid;
-      await setDoc(doc(db,'users',uid,'data','settings'), {
-        selectedBanks:[...state.selectedBanks],
-        bankInstances:state.bankInstances,
-        selectedCards:[...state.selectedCards],
-        cardInstances:state.cardInstances,
-        startDate:state.startDate,
-        reminder:state.reminder,
-        setupDone:state.setupDone,
-        cardBankLinks:state.cardBankLinks||{},
-        verifiedMonths:state.verifiedMonths||{},
-        accountStarts:state.accountStarts||{},
-        updatedAt: Date.now()
-      });
-      await setDoc(doc(db,'users',uid,'data','transactions'), {
-        transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, catMetaOverrides, notesArchive, transferLinks, transferUnlinked, gapExplanations, trustedSuppliers, cardChargeMatches, cardChargeUnmatched, cardChargeManual, cardChargeResolved, cardSettlementResolved,
-        updatedAt: Date.now()
-      });
-      setSyncStatus('synced');
+    const {db, doc, setDoc} = window._fb;
+    const uid = currentUser.uid;
+    await setDoc(doc(db,'users',uid,'data','settings'), {
+      selectedBanks:[...state.selectedBanks],
+      bankInstances:state.bankInstances,
+      selectedCards:[...state.selectedCards],
+      cardInstances:state.cardInstances,
+      startDate:state.startDate,
+      reminder:state.reminder,
+      setupDone:state.setupDone,
+      cardBankLinks:state.cardBankLinks||{},
+      verifiedMonths:state.verifiedMonths||{},
+      accountStarts:state.accountStarts||{},
+      updatedAt: Date.now()
     });
-  } catch(e) { console.error('Cloud save error:', e); setSyncStatus('synced'); }
+    await setDoc(doc(db,'users',uid,'data','transactions'), {
+      transactions, uploadedFiles, customCategories, merchantOverrides, supplierOverrides, incomeOverrides, customIncomeCats, catMetaOverrides, notesArchive, transferLinks, transferUnlinked, gapExplanations, trustedSuppliers, cardChargeMatches, cardChargeUnmatched, cardChargeManual, cardChargeResolved, cardSettlementResolved,
+      updatedAt: Date.now()
+    });
+    setSyncStatus('synced');
+  } catch(e) { console.error('Cloud save error:', e); setSyncStatus('error'); }
 }
 
 // Save original functions before overriding
@@ -4749,6 +4769,9 @@ async function loadFromCloud(uid){
           detectCardChargeMatches();
           _origSaveTx();
         }
+        // We have authoritatively read the cloud (whether or not docs existed) →
+        // it is now safe for saveToCloud to write. New users (no docs yet) reach here too.
+        cloudLoaded = true;
         finish(settingsSnap.exists());
       } catch(e) { console.error('Cloud load error:', e); finish(false); }
     })();
@@ -4824,7 +4847,13 @@ function startAuthFlow(){
       const vb=document.getElementById('version-badge'); if(vb) vb.textContent='v'+APP_VERSION;
       const as=document.getElementById('screen-auth');
       if(as){ as.innerHTML='<div class="auth-loading"><div class="auth-spinner"></div><span>טוען נתונים...</span></div>'; as.style.display='flex'; }
+      // SAFETY NET: populate memory from localStorage first. If the cloud read then
+      // succeeds it overwrites this; if the cloud read fails/times out we still show the
+      // user's real (local) data instead of an empty screen — and because cloudLoaded
+      // stays false in that case, saveToCloud won't overwrite the cloud with it.
+      try{ loadState(); loadTx(); }catch(e){ console.error('local load failed', e); }
       await loadFromCloud(user.uid).catch(()=>{});
+      if(!cloudLoaded){ setSyncStatus('error'); }
       refreshOrigFileKeys().then(()=>{ if(document.getElementById('screen-settings')?.classList.contains('active'))renderUploadedFiles(); });
       if(state.setupDone){ exitAuthTo(showDashboard); }
       else { exitAuthTo(()=>{ initOnboarding(); showScreen('screen-onboarding'); }); }
@@ -4869,7 +4898,7 @@ function renderChatMessages(){
   el.innerHTML = chatHistory.map(m => {
     const isUser = m.role === 'user';
     return `<div class="chat-msg ${isUser?'user':'ai'}">
-      <div class="chat-bubble">${m.content.replace(/\n/g,'<br>')}</div>
+      <div class="chat-bubble">${escHtml(m.content).replace(/\n/g,'<br>')}</div>
     </div>`;
   }).join('');
   setTimeout(()=>{ el.scrollTop = el.scrollHeight; }, 50);
