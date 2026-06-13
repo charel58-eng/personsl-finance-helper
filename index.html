@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.32";
+const APP_VERSION = "2.33";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -743,6 +743,9 @@ button{cursor:pointer;}
     <div class="modal-title" id="acc-start-title">📅 תאריך פתיחת החשבון</div>
     <div class="modal-hint" id="acc-start-hint" style="margin-bottom:12px;"></div>
     <input class="modal-input" id="acc-start-input" type="month" style="letter-spacing:normal;font-size:16px;">
+    <div id="acc-start-card-note" style="display:none;background:var(--blue-dim);border:1px solid var(--blue);border-radius:10px;padding:10px 12px;margin:10px 0;font-size:12px;line-height:1.6;color:var(--text);">
+      💡 <b>בכרטיס אשראי:</b> קבע את החודש לפי <b>פירוט החיובים הראשון</b> שברשותך. שים לב — פירוט החיובים מתפרסם בדרך כלל כחודש אחרי הקניות עצמן, כך שהחודש כאן הוא חודש הפירוט (החיוב), לא חודש הקנייה.
+    </div>
     <div class="modal-hint">חודשים שלפני תאריך זה לא ייחשבו כחסרים בהתראות ובשלמות הנתונים.</div>
     <div class="modal-btns">
       <button class="modal-cancel" onclick="clearAccStart()">מתחילת המעקב</button>
@@ -4703,11 +4706,13 @@ function openAccStart(key, detectedMonth, fromUpload){
   inp.min=state.startDate;
   inp.max=getCurrentYYYYMM();
   inp.value=detectedMonth||cur||state.startDate;
-  document.getElementById('acc-start-title').textContent = fromUpload ? '📅 זוהה תאריך פתיחה' : '📅 תאריך פתיחת החשבון';
+  document.getElementById('acc-start-title').textContent = fromUpload ? '📅 זוהה תאריך פתיחה' : ((acc && acc.type==='card') ? '📅 תחילת מעקב בכרטיס' : '📅 תאריך פתיחת החשבון');
   const nm = acc ? `${acc.icon} ${acc.name}` : 'החשבון';
   document.getElementById('acc-start-hint').innerHTML = fromUpload
     ? `נראה ש${nm} נפתח בערך ב‑<b>${detectedMonth}</b>. אם זה נכון לחץ שמירה, או שנה את התאריך:`
     : nm;
+  const cardNote=document.getElementById('acc-start-card-note');
+  if(cardNote) cardNote.style.display=(acc && acc.type==='card')?'block':'none';
   document.getElementById('acc-start-modal').classList.add('open');
   setTimeout(()=>inp?.focus(),60);
 }
