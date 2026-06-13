@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.28";
+const APP_VERSION = "2.31";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -386,6 +386,15 @@ button{cursor:pointer;}
 .si-digits{font-size:12px;color:var(--text2);font-family:monospace;letter-spacing:2px;}
 .si-edit{font-size:12px;color:var(--blue);font-weight:600;cursor:pointer;}
 .btn-danger{width:100%;padding:14px;background:var(--red-dim);border:1.5px solid var(--red);border-radius:14px;color:var(--red);font-size:15px;font-weight:700;}
+.btn-add-acc{width:100%;padding:12px;margin-top:4px;background:var(--surface2);border:1.5px dashed var(--border2);border-radius:14px;color:var(--text2);font-size:14px;font-weight:700;font-family:'Heebo';cursor:pointer;}
+.btn-add-acc:active{background:var(--surface3);}
+.btn-toggle-inactive{width:100%;padding:11px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:12px;color:var(--text2);font-size:13px;font-weight:700;font-family:'Heebo';cursor:pointer;}
+.btn-toggle-inactive:active{background:var(--surface3);}
+.si-inactive{font-size:10px;font-weight:700;color:var(--text3);background:var(--surface3);border:1px solid var(--border2);border-radius:6px;padding:1px 6px;margin-right:6px;}
+.si-del{font-size:12px;color:var(--red);font-weight:600;cursor:pointer;}
+.icon-pick{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:8px 0;}
+.icon-pick button{font-size:20px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;width:42px;height:42px;cursor:pointer;}
+.icon-pick button.sel{border-color:var(--blue);background:var(--blue-dim);}
 
 /* ── MODAL ── */
 .modal-overlay{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.75);display:none;align-items:flex-end;justify-content:center;backdrop-filter:blur(4px);}
@@ -668,6 +677,66 @@ button{cursor:pointer;}
   </div>
 </div>
 
+<!-- Account closure / end-date modal -->
+<div class="modal-overlay" id="acc-end-modal" onclick="if(event.target===this)closeAccEnd()">
+  <div class="modal-box">
+    <div class="modal-title">⏸️ הפיכת חשבון ללא פעיל</div>
+    <div class="modal-hint" id="acc-end-hint" style="margin-bottom:12px;"></div>
+    <input class="modal-input" id="acc-end-input" type="month" style="letter-spacing:normal;font-size:16px;">
+    <div class="modal-hint">בחר את החודש האחרון שבו החשבון היה פעיל (כולל). אחרי חודש זה לא יידרשו דפים והחודשים הבאים לא ייספרו בשלמות הנתונים. הנתונים ההיסטוריים נשמרים.</div>
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="clearAccEnd()">החזר לפעיל</button>
+      <button class="modal-ok" onclick="saveAccEnd()">שמירה</button>
+    </div>
+  </div>
+</div>
+
+<!-- Custom institution (free-name bank / card) modal -->
+<div class="modal-overlay" id="custom-inst-modal" onclick="if(event.target===this)closeCustomInstModal()">
+  <div class="modal-box">
+    <div class="modal-title" id="custom-inst-title">➕ מוסד אחר</div>
+    <input class="modal-input" id="custom-inst-name" type="text" placeholder="שם המוסד" style="letter-spacing:normal;font-size:16px;text-align:right;">
+    <div class="modal-hint">בחר אייקון:</div>
+    <div class="icon-pick" id="custom-inst-icons"></div>
+    <input class="modal-input" id="custom-inst-digits" type="tel" maxlength="4" placeholder="4 ספרות (לא חובה)">
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="closeCustomInstModal()">ביטול</button>
+      <button class="modal-ok" onclick="saveCustomInst()">צור</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add account/card modal (catalog + custom) -->
+<div class="modal-overlay" id="add-acc-modal" onclick="if(event.target===this)closeAddAccountModal()">
+  <div class="modal-box">
+    <div class="modal-title" id="add-acc-title">➕ הוספת חשבון</div>
+    <div class="modal-hint" style="margin-bottom:8px;">בחר מוסד מהרשימה:</div>
+    <select id="add-acc-select" style="width:100%;background:var(--surface2);border:1.5px solid var(--border2);border-radius:10px;padding:12px 14px;color:var(--text);font-family:'Heebo';font-size:15px;margin-bottom:10px;"></select>
+    <input class="modal-input" id="add-acc-digits" type="tel" maxlength="4" placeholder="4 ספרות (לא חובה)">
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="closeAddAccountModal()">ביטול</button>
+      <button class="modal-ok" onclick="saveAddAccount()">הוסף</button>
+    </div>
+    <button class="btn-add-acc" style="margin-top:10px;" id="add-acc-other-btn">➕ מוסד אחר (שם חופשי)</button>
+  </div>
+</div>
+
+<!-- Delete account confirmation modal -->
+<div class="modal-overlay" id="del-acc-modal" onclick="if(event.target===this)closeDeleteAccount()">
+  <div class="modal-box">
+    <div class="modal-title" style="color:var(--red);">🗑️ מחיקת חשבון</div>
+    <div class="modal-hint" id="del-acc-body" style="margin-bottom:12px;line-height:1.6;"></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer;margin-bottom:4px;">
+      <input type="checkbox" id="del-acc-confirm" onchange="document.getElementById('del-acc-btn').disabled=!this.checked;" style="width:18px;height:18px;">
+      אני מבין שהפעולה בלתי הפיכה ומוחקת את כל הנתונים של החשבון
+    </label>
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="closeDeleteAccount()">ביטול</button>
+      <button class="modal-ok" id="del-acc-btn" disabled style="background:var(--red);" onclick="confirmDeleteAccount()">מחק לצמיתות</button>
+    </div>
+  </div>
+</div>
+
 <!-- Account opening / start-date modal -->
 <div class="modal-overlay" id="acc-start-modal" onclick="if(event.target===this)closeAccStart()">
   <div class="modal-box">
@@ -858,6 +927,8 @@ button{cursor:pointer;}
     </div>
   </div>
 
+  <div id="inactive-toggle-wrap" style="display:none;padding:0 20px 4px;"></div>
+
   <div class="db-section">
     <div class="section-header"><div class="section-title">🏦 חשבונות בנק</div></div>
     <div id="db-bank-accounts"></div>
@@ -941,10 +1012,12 @@ button{cursor:pointer;}
   <div class="settings-section">
     <div class="settings-section-label">חשבונות בנק</div>
     <div id="settings-banks"></div>
+    <button class="btn-add-acc" onclick="openAddAccountModal('bank')">➕ הוסף חשבון בנק</button>
   </div>
   <div class="settings-section">
     <div class="settings-section-label">כרטיסי אשראי</div>
     <div id="settings-cards"></div>
+    <button class="btn-add-acc" onclick="openAddAccountModal('card')">➕ הוסף כרטיס אשראי</button>
   </div>
   <div class="settings-section">
     <div class="settings-section-label">📋 ארכיון הערות</div>
@@ -1123,6 +1196,9 @@ let state = {
   cardBankLinks: {},   // {cardKey: bankKey} — which bank account each card is charged to
   verifiedMonths: {},  // {accountKey: ['2026-01', ...]} — months that passed balance/charge checks
   accountStarts: {},   // {accountKey: 'YYYY-MM'} — per-account opening month; months before it aren't counted as missing
+  accountEnds: {},     // {accountKey: 'YYYY-MM'} — last ACTIVE month (inclusive); months after it aren't tracked (account closed)
+  customBanks: {},     // {id: {id,name,icon,color}} — user-defined banks not in the BANKS catalog
+  customCards: {},     // {id: {id,name,icon,color}} — user-defined credit cards not in the CREDIT_CARDS catalog
 };
 
 // notesArchive: [{id, accountKey, type:'logo'|'balance'|'card_charge', severity:'info'|'warn'|'severe', text, date, resolved}]
@@ -1184,6 +1260,13 @@ const CARD_CHARGE_RE = /מקס|max|ויזה|visa|כ\.?א\.?ל|cal|ישראכרט
 
 let currentMonth = new Date();
 let alertsExpanded = false;
+// A closed account that is data-complete (no missing-data notes) is auto-hidden from the dashboard
+// once this many months have passed since its last active month. Revealed via a toggle button.
+const INACTIVE_HIDE_MONTHS = 3;
+// After this many months since the last active month, a closed account moves to the inactive list
+// REGARDLESS of completeness (even if it still has missing-data notes).
+const INACTIVE_FORCE_HIDE_MONTHS = 12;
+let showInactiveAccounts = false;
 
 // ═══════════════════════════
 //  STORAGE
@@ -1200,6 +1283,9 @@ function saveState() {
     cardBankLinks:state.cardBankLinks||{},
     verifiedMonths:state.verifiedMonths||{},
     accountStarts:state.accountStarts||{},
+    accountEnds:state.accountEnds||{},
+    customBanks:state.customBanks||{},
+    customCards:state.customCards||{},
   };
   try{localStorage.setItem(STORAGE_KEY,JSON.stringify(s));}catch(e){}
 }
@@ -1218,6 +1304,9 @@ function loadState() {
     state.cardBankLinks=s.cardBankLinks||{};
     state.verifiedMonths=s.verifiedMonths||{};
     state.accountStarts=s.accountStarts||{};
+    state.accountEnds=s.accountEnds||{};
+    state.customBanks=s.customBanks||{};
+    state.customCards=s.customCards||{};
     return true;
   }catch(e){return false;}
 }
@@ -1258,7 +1347,7 @@ function loadTx(){
 function getAllAccounts() {
   const accs = [];
   state.selectedBanks.forEach(id => {
-    const b = BANKS.find(x=>x.id===id);
+    const b = bankDef(id);
     const insts = state.bankInstances[id]||[{id:'default',digits:''}];
     insts.forEach((inst,i) => {
       accs.push({key:`bank_${id}_${inst.id}`, type:'bank', entityId:id, instIndex:i,
@@ -1266,7 +1355,7 @@ function getAllAccounts() {
     });
   });
   state.selectedCards.forEach(id => {
-    const c = CREDIT_CARDS.find(x=>x.id===id);
+    const c = cardDef(id);
     const insts = state.cardInstances[id]||[{id:'default',digits:''}];
     insts.forEach((inst,i) => {
       accs.push({key:`card_${id}_${inst.id}`, type:'card', entityId:id, instIndex:i,
@@ -1275,6 +1364,13 @@ function getAllAccounts() {
   });
   return accs;
 }
+
+// Institution lookups — catalog first, then user-defined (custom) institutions.
+// Always return a usable object so custom/orphan ids never crash a renderer.
+function bankDef(id){ return BANKS.find(x=>x.id===id) || (state.customBanks&&state.customBanks[id]) || {id,name:'בנק',icon:'🏦',color:'#888'}; }
+function cardDef(id){ return CREDIT_CARDS.find(x=>x.id===id) || (state.customCards&&state.customCards[id]) || {id,name:'כרטיס',icon:'💳',color:'#888'}; }
+function isCustomBank(id){ return !BANKS.some(x=>x.id===id); }
+function isCustomCard(id){ return !CREDIT_CARDS.some(x=>x.id===id); }
 
 function fmtAmount(n){return new Intl.NumberFormat('he-IL',{style:'currency',currency:'ILS',minimumFractionDigits:0,maximumFractionDigits:0}).format(Math.abs(n));}
 
@@ -1745,6 +1841,48 @@ function effAccountStart(accountKey){
   const a=(state.accountStarts||{})[accountKey];
   return (a && a>state.startDate) ? a : state.startDate;
 }
+// Account closure: accountEnds[key] = last ACTIVE month (inclusive). Months after it aren't tracked.
+function effAccountEnd(accountKey){ return (state.accountEnds||{})[accountKey]||null; }
+// "Inactive now" = a closure month is set AND it is already in the past (current month is beyond it).
+function isAccountActive(accountKey){
+  const e=effAccountEnd(accountKey);
+  return !e || getCurrentYYYYMM() <= e;
+}
+// Last month to track for an account: capped at the closure month when the account is already closed.
+function effLastTrackedMonth(accountKey){
+  const now=getCurrentYYYYMM();
+  const e=effAccountEnd(accountKey);
+  return (e && e<now) ? e : now;
+}
+// Months elapsed from YYYY-MM `a` to YYYY-MM `b` (b - a).
+function monthsBetweenCount(a,b){
+  const [ay,am]=a.split('-').map(Number), [by,bm]=b.split('-').map(Number);
+  return (by*12+(bm-1)) - (ay*12+(am-1));
+}
+// Is the account data-complete? (100% completeness, no missing months, and — for banks — no unexplained gaps.)
+function isAccountDataComplete(accountKey){
+  const comp=getAccountCompleteness(accountKey);
+  if(comp.pct!==100 || comp.missingMonths.length>0) return false;
+  const acc=getAllAccounts().find(a=>a.key===accountKey);
+  if(acc && acc.type==='bank'){
+    const gaps=computeAccountGaps(transactions.filter(t=>t.accountKey===accountKey));
+    if(gaps.some(g=>!gapExplanations[accGapKey(accountKey,g.older,g.newer)])) return false;
+  }
+  return true;
+}
+// Auto-hidden = inactive (closed in the past) AND one of:
+//   • more than INACTIVE_HIDE_MONTHS since closure AND data-complete, or
+//   • at least INACTIVE_FORCE_HIDE_MONTHS since closure (regardless of completeness).
+function isAccountAutoHidden(accountKey){
+  if(isAccountActive(accountKey)) return false;
+  const end=effAccountEnd(accountKey); if(!end) return false;
+  const m=monthsBetweenCount(end, getCurrentYYYYMM());
+  if(m >= INACTIVE_FORCE_HIDE_MONTHS) return true;     // 12+ months → inactive list in any case
+  if(m <= INACTIVE_HIDE_MONTHS) return false;          // within the grace window → stays visible
+  return isAccountDataComplete(accountKey);            // 3–12 months → hide only if complete
+}
+function hasAutoHiddenAccounts(){ return getAllAccounts().some(a=>isAccountAutoHidden(a.key)); }
+function countAutoHiddenAccounts(){ return getAllAccounts().filter(a=>isAccountAutoHidden(a.key)).length; }
 function nextMonthStr(m){ let [y,mo]=m.split('-').map(Number); mo++; if(mo>12){mo=1;y++;} return `${y}-${String(mo).padStart(2,'0')}`; }
 // Has the statement for month `m` come due yet? Banks: 1st of the following month. Cards: 10th of the following month.
 // (e.g. June card statement is due on 10 July → no "missing" alert before then.)
@@ -1768,7 +1906,9 @@ function getAccountCompleteness(accountKey) {
   const acc=getAllAccounts().find(a=>a.key===accountKey);
   const type=acc?acc.type:'bank';
   const now = getCurrentYYYYMM();
-  const months = getMonthsBetween(effAccountStart(accountKey), now);
+  const start = effAccountStart(accountKey);
+  const lastTracked = effLastTrackedMonth(accountKey); // capped at closure month if closed
+  const months = (start>lastTracked) ? [] : getMonthsBetween(start, lastTracked);
   const covered = new Set(uploadedFiles.filter(f=>f.accountKey===accountKey).flatMap(f=>f.coveredMonths&&f.coveredMonths.length?f.coveredMonths:getMonthsBetween(f.dateRange.from, f.dateRange.to)));
   const result = months.map(m=>{
     let status;
@@ -1813,21 +1953,35 @@ function buildAlerts() {
 //  ONBOARDING
 // ═══════════════════════════
 function buildBanksGrid(){
-  document.getElementById('banks-grid').innerHTML=BANKS.map(b=>`
+  const customList=Object.values(state.customBanks||{});
+  const tiles=BANKS.concat(customList).map(b=>`
     <div class="card-option" id="bank-opt-${b.id}" onclick="toggleBank('${b.id}')">
       <div class="card-check">✓</div><div class="card-opt-icon">${b.icon}</div>
       <div class="card-opt-name">${b.name}</div><div class="card-opt-sub">בנק</div>
     </div>`).join('');
+  const addTile=`
+    <div class="card-option" onclick="openCustomInstModal('bank','onboarding')" style="border-style:dashed;">
+      <div class="card-opt-icon">➕</div>
+      <div class="card-opt-name">מוסד אחר</div><div class="card-opt-sub">שם חופשי</div>
+    </div>`;
+  document.getElementById('banks-grid').innerHTML=tiles+addTile;
   state.selectedBanks.forEach(id=>{document.getElementById('bank-opt-'+id)?.classList.add('selected');});
   renderBankInstances(); updateBanksNext();
 }
 
 function buildCardsGrid(){
-  document.getElementById('cards-grid').innerHTML=CREDIT_CARDS.map(c=>`
+  const customList=Object.values(state.customCards||{});
+  const tiles=CREDIT_CARDS.concat(customList).map(c=>`
     <div class="card-option" id="card-opt-${c.id}" onclick="toggleCard('${c.id}')">
       <div class="card-check">✓</div><div class="card-opt-icon">${c.icon}</div>
       <div class="card-opt-name">${c.name}</div><div class="card-opt-sub">כרטיס</div>
     </div>`).join('');
+  const addTile=`
+    <div class="card-option" onclick="openCustomInstModal('card','onboarding')" style="border-style:dashed;">
+      <div class="card-opt-icon">➕</div>
+      <div class="card-opt-name">כרטיס אחר</div><div class="card-opt-sub">שם חופשי</div>
+    </div>`;
+  document.getElementById('cards-grid').innerHTML=tiles+addTile;
   state.selectedCards.forEach(id=>{document.getElementById('card-opt-'+id)?.classList.add('selected-blue');});
   renderCardInstances(); updateCardsNext();
 }
@@ -1848,7 +2002,7 @@ function toggleCard(id){
 function renderBankInstances(){
   const c=document.getElementById('bank-instances');
   c.innerHTML=[...state.selectedBanks].map(bid=>{
-    const b=BANKS.find(x=>x.id===bid);
+    const b=bankDef(bid);
     const insts=state.bankInstances[bid]||[];
     return `<div class="instances-panel">
       <div class="inst-title">${b.icon} ${b.name}</div>
@@ -1869,7 +2023,7 @@ function renderBankInstances(){
 function renderCardInstances(){
   const c=document.getElementById('card-instances');
   c.innerHTML=[...state.selectedCards].map(cid=>{
-    const cc=CREDIT_CARDS.find(x=>x.id===cid);
+    const cc=cardDef(cid);
     const insts=state.cardInstances[cid]||[];
     return `<div class="instances-panel">
       <div class="inst-title">${cc.icon} ${cc.name}</div>
@@ -1936,12 +2090,12 @@ function goStep(n){
 function buildObSummary(){
   const el=document.getElementById('ob-summary');
   const banks=[...state.selectedBanks].map(id=>{
-    const b=BANKS.find(x=>x.id===id);
+    const b=bankDef(id);
     const insts=state.bankInstances[id]||[];
     return `<span class="tag">${b.icon} ${b.name}${insts.map(i=>i.digits?` ••${i.digits}`:'').join(',')}</span>`;
   }).join('');
   const cards=[...state.selectedCards].map(id=>{
-    const c=CREDIT_CARDS.find(x=>x.id===id);
+    const c=cardDef(id);
     const insts=state.cardInstances[id]||[];
     return `<span class="tag blue">${c.icon} ${c.name}${insts.map(i=>i.digits?` ••${i.digits}`:'').join(',')}</span>`;
   }).join('');
@@ -2005,6 +2159,18 @@ function renderDashboard(){
       document.getElementById('alert-items').innerHTML+=`<div class="alert-item" style="color:var(--amber)">ועוד ${alerts.length-3} חוסרים נוספים — לחץ לפרטים</div>`;
     }
   } else { ab.style.display='none'; }
+
+  // Toggle for auto-hidden (closed + complete) accounts — only shown when at least one exists.
+  const wrap=document.getElementById('inactive-toggle-wrap');
+  if(wrap){
+    if(hasAutoHiddenAccounts()){
+      const n=countAutoHiddenAccounts();
+      wrap.style.display='block';
+      wrap.innerHTML=`<button class="btn-toggle-inactive" onclick="toggleInactiveAccounts()">${showInactiveAccounts?'🙈 הסתר חשבונות לא פעילים':('👁️ הצג גם חשבונות לא פעילים ('+n+')')}</button>`;
+    } else {
+      wrap.style.display='none'; wrap.innerHTML=''; showInactiveAccounts=false;
+    }
+  }
 
   // Bank accounts
   renderAccountSection('db-bank-accounts','bank');
@@ -2123,15 +2289,23 @@ function trustFromEditor(){ const id=txEditId; closeTxEdit(); trustSupplier(id);
 
 function renderAccountSection(containerId, type){
   const container=document.getElementById(containerId);
-  const accs=getAllAccounts().filter(a=>a.type===type);
-  if(accs.length===0){container.innerHTML='<div class="empty-state" style="padding:16px">לא הוגדרו</div>';return;}
+  let accs=getAllAccounts().filter(a=>a.type===type);
+  const hadAccounts=accs.length>0;
+  if(!showInactiveAccounts) accs=accs.filter(a=>!isAccountAutoHidden(a.key));
+  if(accs.length===0){
+    container.innerHTML = hadAccounts ? '' : '<div class="empty-state" style="padding:16px">לא הוגדרו</div>';
+    return;
+  }
   container.innerHTML=accs.map(acc=>{
     const comp=getAccountCompleteness(acc.key);
     const statusClass=comp.pct===100?'green':comp.pct>0?'amber':'red';
     const statusText=comp.pct===100?'✅ שלם':comp.pct>0?`${comp.pct}% שלם`:'⚠️ אין נתונים';
     const fillColor=comp.pct===100?'var(--green)':comp.pct>0?'var(--amber)':'var(--red)';
     const now=getCurrentYYYYMM();
-    const allMonths=getMonthsBetween(effAccountStart(acc.key),now);
+    const startM=effAccountStart(acc.key);
+    const lastM=effLastTrackedMonth(acc.key);
+    const allMonths=(startM>lastM)?[]:getMonthsBetween(startM,lastM);
+    const inactive=!isAccountActive(acc.key);
     const dotsHtml=allMonths.slice(-12).map(m=>{
       const st=comp.months.find(x=>x.month===m);
       const s=st?st.status:'future';
@@ -2143,7 +2317,7 @@ function renderAccountSection(containerId, type){
       <div class="acc-main">
         <div class="acc-icon ${type}">${acc.icon}</div>
         <div>
-          <div class="acc-name">${acc.name}</div>
+          <div class="acc-name">${acc.name}${inactive?' <span style="font-size:10px;font-weight:700;color:var(--text3);background:var(--surface3);border:1px solid var(--border2);border-radius:6px;padding:1px 6px;margin-right:4px;">לא פעיל</span>':''}</div>
           <div class="acc-digits">${acc.digits?'••••'+acc.digits:'ספרות לא הוזנו'}</div>
         </div>
         <div class="acc-right">
@@ -2165,6 +2339,7 @@ function renderAccountSection(containerId, type){
 }
 
 function toggleAlerts(){alertsExpanded=!alertsExpanded;renderDashboard();}
+function toggleInactiveAccounts(){showInactiveAccounts=!showInactiveAccounts;renderDashboard();}
 function changeMonth(d){currentMonth.setMonth(currentMonth.getMonth()+d);renderDashboard();}
 
 // ═══════════════════════════
@@ -2189,7 +2364,7 @@ function renderUploadScreen(){
   if(sel){
     const accounts=getAllAccounts();
     sel.innerHTML='<option value="">🔍 זהה אוטומטית (AI)</option>'+
-      accounts.map(a=>`<option value="${a.key}">${a.icon} ${a.name}</option>`).join('');
+      accounts.map(a=>`<option value="${a.key}">${a.icon} ${a.name}${isAccountActive(a.key)?'':' · לא פעיל'}</option>`).join('');
   }
   // drag-drop
   const dz=document.getElementById('drop-zone');
@@ -4427,20 +4602,29 @@ function renderSettings(){
   const banksDiv=document.getElementById('settings-banks');
   if(state.selectedBanks.size===0){banksDiv.innerHTML='<div class="empty-state" style="padding:12px">לא הוגדרו</div>';}
   else{banksDiv.innerHTML=[...state.selectedBanks].map(id=>{
-    const b=BANKS.find(x=>x.id===id);
+    const b=bankDef(id);
     const insts=state.bankInstances[id]||[];
     return `<div class="settings-row">
       <div class="settings-row-header"><div class="settings-row-name">${b.icon} ${b.name}</div></div>
       <div class="settings-instances">${insts.map((inst,i)=>{
         const acctKey=`bank_${id}_${inst.id}`;
+        const inactive=!isAccountActive(acctKey);
         return `
-        <div class="si-row"><span class="si-icon">🏦</span><span class="si-name">חשבון ${i+1}</span>
+        <div class="si-row"><span class="si-icon">🏦</span><span class="si-name">חשבון ${i+1}${inactive?'<span class="si-inactive">לא פעיל</span>':''}</span>
         <span class="si-digits">${inst.digits?'••••'+inst.digits:'—'}</span>
         <span class="si-edit" onclick="openDigitsModal('bank','${id}','${inst.id}','${b.name} חשבון ${i+1}')">ערוך</span></div>
         <div class="si-row" style="padding-right:24px;">
           <span class="si-name" style="font-size:12px;color:var(--text2);">📅 תאריך התחלה:</span>
           <span class="si-digits" style="flex:1;">${fmtStartLabel(acctKey)}</span>
           <span class="si-edit" onclick="openAccStart('${acctKey}')">ערוך</span>
+        </div>
+        <div class="si-row" style="padding-right:24px;">
+          <span class="si-name" style="font-size:12px;color:var(--text2);">⏸️ פעיל עד:</span>
+          <span class="si-digits" style="flex:1;">${fmtEndLabel(acctKey)}</span>
+          <span class="si-edit" onclick="openAccEnd('${acctKey}')">ערוך</span>
+        </div>
+        <div class="si-row" style="padding-right:24px;justify-content:flex-end;">
+          <span class="si-del" onclick="openDeleteAccount('${acctKey}')">🗑️ מחק חשבון זה</span>
         </div>`;
       }).join('')}
       </div></div>`;
@@ -4451,15 +4635,16 @@ function renderSettings(){
   else{
     const bankAccounts=getAllAccounts().filter(a=>a.type==='bank');
     cardsDiv.innerHTML=[...state.selectedCards].map(id=>{
-    const c=CREDIT_CARDS.find(x=>x.id===id);
+    const c=cardDef(id);
     const insts=state.cardInstances[id]||[];
     return `<div class="settings-row">
       <div class="settings-row-header"><div class="settings-row-name">${c.icon} ${c.name}</div></div>
       <div class="settings-instances">${insts.map((inst,i)=>{
         const cardKey=`card_${id}_${inst.id}`;
         const linkedBank=state.cardBankLinks[cardKey]||'';
+        const inactive=!isAccountActive(cardKey);
         return `
-        <div class="si-row"><span class="si-icon">💳</span><span class="si-name">כרטיס ${i+1}</span>
+        <div class="si-row"><span class="si-icon">💳</span><span class="si-name">כרטיס ${i+1}${inactive?'<span class="si-inactive">לא פעיל</span>':''}</span>
         <span class="si-digits">${inst.digits?'••••'+inst.digits:'—'}</span>
         <span class="si-edit" onclick="openDigitsModal('card','${id}','${inst.id}','${c.name} כרטיס ${i+1}')">ערוך</span></div>
         <div class="si-row" style="padding-right:24px;">
@@ -4473,6 +4658,14 @@ function renderSettings(){
           <span class="si-name" style="font-size:12px;color:var(--text2);">📅 תאריך התחלה:</span>
           <span class="si-digits" style="flex:1;">${fmtStartLabel(cardKey)}</span>
           <span class="si-edit" onclick="openAccStart('${cardKey}')">ערוך</span>
+        </div>
+        <div class="si-row" style="padding-right:24px;">
+          <span class="si-name" style="font-size:12px;color:var(--text2);">⏸️ פעיל עד:</span>
+          <span class="si-digits" style="flex:1;">${fmtEndLabel(cardKey)}</span>
+          <span class="si-edit" onclick="openAccEnd('${cardKey}')">ערוך</span>
+        </div>
+        <div class="si-row" style="padding-right:24px;justify-content:flex-end;">
+          <span class="si-del" onclick="openDeleteAccount('${cardKey}')">🗑️ מחק כרטיס זה</span>
         </div>`;
       }).join('')}
       </div></div>`;
@@ -4545,6 +4738,192 @@ function clearAccStart(){
   _afterAccStartChange();
 }
 
+// ── Account closure / end-date (active until) ──
+let accEndKey=null;
+function fmtEndLabel(key){
+  const v=(state.accountEnds||{})[key];
+  if(!v) return 'פעיל (ללא הגבלה)';
+  const d=new Date(v+'-01');
+  const label='פעיל עד '+d.toLocaleDateString('he-IL',{year:'numeric',month:'long'});
+  return isAccountActive(key) ? label : label+' · לא פעיל';
+}
+function openAccEnd(key){
+  accEndKey=key;
+  const acc=getAllAccounts().find(a=>a.key===key);
+  const cur=(state.accountEnds||{})[key]||'';
+  const inp=document.getElementById('acc-end-input');
+  inp.min=effAccountStart(key);          // can't close before it opened / before global tracking start
+  inp.value=cur||getCurrentYYYYMM();
+  const nm = acc ? `${acc.icon} ${acc.name}` : 'החשבון';
+  document.getElementById('acc-end-hint').textContent=nm;
+  document.getElementById('acc-end-modal').classList.add('open');
+  setTimeout(()=>inp?.focus(),60);
+}
+function closeAccEnd(){ document.getElementById('acc-end-modal').classList.remove('open'); accEndKey=null; }
+function _afterAccEndChange(){
+  saveState(); if(typeof currentUser!=='undefined' && currentUser) saveToCloud();
+  closeAccEnd();
+  if(document.getElementById('screen-settings')?.classList.contains('active')) renderSettings();
+  if(document.getElementById('screen-dashboard')?.classList.contains('active')) renderDashboard();
+}
+function saveAccEnd(){
+  if(!accEndKey){ closeAccEnd(); return; }
+  const v=document.getElementById('acc-end-input').value;
+  state.accountEnds=state.accountEnds||{};
+  if(v && v>=effAccountStart(accEndKey)) state.accountEnds[accEndKey]=v;
+  else { delete state.accountEnds[accEndKey]; if(v) showToast('⚠️ תאריך הסיום חייב להיות אחרי ההתחלה'); }
+  _afterAccEndChange();
+}
+function clearAccEnd(){
+  if(accEndKey){ state.accountEnds=state.accountEnds||{}; delete state.accountEnds[accEndKey]; }
+  _afterAccEndChange();
+}
+
+// ═══════════════════════════
+//  ADD ACCOUNT / CUSTOM INSTITUTION  (shared by onboarding + settings)
+// ═══════════════════════════
+const BANK_ICONS=['🏦','🔵','🟠','🔴','🟡','🟣','🟢','⚪','💰','🏛️'];
+const CARD_ICONS=['💳','💙','🔶','💛','🟢','⚫','🔵','🟣','💜','🟧'];
+let customInstType=null, customInstOrigin=null, customInstIcon=null;
+
+// Create a free-name institution + its first instance. Shared low-level logic (no UI).
+function createCustomInstitution(type,name,icon,digits){
+  const id=(type==='bank'?'cb_':'cc_')+Date.now();
+  const def={id,name:name,icon:icon||(type==='bank'?'🏦':'💳'),color:'#888'};
+  if(type==='bank'){ state.customBanks=state.customBanks||{}; state.customBanks[id]=def; state.selectedBanks.add(id); state.bankInstances[id]=[{id:Date.now(),digits:(digits||'').replace(/\D/g,'').slice(0,4)}]; }
+  else { state.customCards=state.customCards||{}; state.customCards[id]=def; state.selectedCards.add(id); state.cardInstances[id]=[{id:Date.now(),digits:(digits||'').replace(/\D/g,'').slice(0,4)}]; }
+  return id;
+}
+
+function openCustomInstModal(type,origin){
+  customInstType=type; customInstOrigin=origin||(document.getElementById('screen-settings')?.classList.contains('active')?'settings':'onboarding');
+  customInstIcon=(type==='bank')?BANK_ICONS[0]:CARD_ICONS[0];
+  document.getElementById('custom-inst-title').textContent=(type==='bank')?'➕ בנק אחר':'➕ כרטיס אחר';
+  document.getElementById('custom-inst-name').value='';
+  document.getElementById('custom-inst-name').placeholder=(type==='bank')?'שם הבנק':'שם חברת האשראי';
+  document.getElementById('custom-inst-digits').value='';
+  const icons=(type==='bank')?BANK_ICONS:CARD_ICONS;
+  document.getElementById('custom-inst-icons').innerHTML=icons.map(ic=>`<button class="${ic===customInstIcon?'sel':''}" onclick="pickCustomIcon('${ic}',this)">${ic}</button>`).join('');
+  // if we were sitting on the add-account modal, close it first
+  document.getElementById('add-acc-modal')?.classList.remove('open');
+  document.getElementById('custom-inst-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('custom-inst-name')?.focus(),60);
+}
+function pickCustomIcon(ic,el){
+  customInstIcon=ic;
+  el.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('sel'));
+  el.classList.add('sel');
+}
+function closeCustomInstModal(){ document.getElementById('custom-inst-modal').classList.remove('open'); }
+function saveCustomInst(){
+  const name=document.getElementById('custom-inst-name').value.trim();
+  if(!name){ showToast('⚠️ יש להזין שם'); return; }
+  const digits=document.getElementById('custom-inst-digits').value;
+  createCustomInstitution(customInstType,name,customInstIcon,digits);
+  closeCustomInstModal();
+  if(customInstOrigin==='onboarding'){
+    if(customInstType==='bank'){ buildBanksGrid(); } else { buildCardsGrid(); }
+  } else {
+    saveState(); if(typeof currentUser!=='undefined' && currentUser) saveToCloud();
+    renderSettings();
+  }
+  showToast('✅ נוסף: '+name);
+}
+
+// Add from catalog (or jump to custom) — used by the settings "הוסף" buttons.
+function openAddAccountModal(type){
+  customInstType=type;
+  document.getElementById('add-acc-title').textContent=(type==='bank')?'➕ הוספת חשבון בנק':'➕ הוספת כרטיס אשראי';
+  const catalog=(type==='bank')?BANKS:CREDIT_CARDS;
+  const sel=document.getElementById('add-acc-select');
+  // For each catalog institution show how many instances already exist (max 3).
+  const store=(type==='bank')?state.bankInstances:state.cardInstances;
+  sel.innerHTML=catalog.map(inst=>{
+    const n=(store[inst.id]||[]).length;
+    const full=n>=3;
+    return `<option value="${inst.id}" ${full?'disabled':''}>${inst.icon} ${inst.name}${n>0?` (${n} קיימים${full?' · מלא':''})`:''}</option>`;
+  }).join('');
+  document.getElementById('add-acc-digits').value='';
+  document.getElementById('add-acc-other-btn').onclick=()=>openCustomInstModal(type,'settings');
+  document.getElementById('add-acc-modal').classList.add('open');
+}
+function closeAddAccountModal(){ document.getElementById('add-acc-modal').classList.remove('open'); }
+function saveAddAccount(){
+  const type=customInstType;
+  const id=document.getElementById('add-acc-select').value;
+  if(!id){ closeAddAccountModal(); return; }
+  const sel=(type==='bank')?state.selectedBanks:state.selectedCards;
+  const store=(type==='bank')?state.bankInstances:state.cardInstances;
+  if(!sel.has(id)){ sel.add(id); store[id]=store[id]||[]; }
+  if((store[id]||[]).length>=3){ showToast('⚠️ מקסימום 3 מופעים למוסד'); return; }
+  const digits=document.getElementById('add-acc-digits').value.replace(/\D/g,'').slice(0,4);
+  store[id]=store[id]||[]; store[id].push({id:Date.now(),digits});
+  closeAddAccountModal();
+  saveState(); if(typeof currentUser!=='undefined' && currentUser) saveToCloud();
+  renderSettings();
+  showToast('✅ נוסף');
+}
+
+// ═══════════════════════════
+//  DELETE ACCOUNT (with hard confirmation)
+// ═══════════════════════════
+let delAccKey=null;
+function openDeleteAccount(key){
+  delAccKey=key;
+  const acc=getAllAccounts().find(a=>a.key===key);
+  const txCount=transactions.filter(t=>t.accountKey===key).length;
+  const fileCount=uploadedFiles.filter(f=>f.accountKey===key).length;
+  const nm=acc?`${acc.icon} ${acc.name}`:'החשבון';
+  document.getElementById('del-acc-body').innerHTML=
+    `מחיקת <b>${nm}</b> תסיר לצמיתות:<br>• ${txCount} תנועות<br>• ${fileCount} דפים שהועלו<br>• כל הקישורים, ההתאמות וההגדרות של החשבון<br><br><b style="color:var(--red);">לא ניתן לשחזר.</b>`;
+  document.getElementById('del-acc-confirm').checked=false;
+  document.getElementById('del-acc-btn').disabled=true;
+  document.getElementById('del-acc-modal').classList.add('open');
+}
+function closeDeleteAccount(){ document.getElementById('del-acc-modal').classList.remove('open'); delAccKey=null; }
+function confirmDeleteAccount(){
+  const key=delAccKey;
+  if(!key){ closeDeleteAccount(); return; }
+  const acc=getAllAccounts().find(a=>a.key===key);
+  if(!acc){ closeDeleteAccount(); return; }
+  const type=acc.type, eid=acc.entityId, iid=acc.instId;
+  // 1) transactions belonging to this account (collect ids for link cleanup)
+  const removedTxIds=new Set(transactions.filter(t=>t.accountKey===key).map(t=>t.id));
+  transactions=transactions.filter(t=>t.accountKey!==key);
+  uploadedFiles=uploadedFiles.filter(f=>f.accountKey!==key);
+  // 2) per-account settings
+  delete (state.cardBankLinks||{})[key];
+  Object.keys(state.cardBankLinks||{}).forEach(ck=>{ if(state.cardBankLinks[ck]===key) delete state.cardBankLinks[ck]; });
+  delete (state.accountStarts||{})[key];
+  delete (state.accountEnds||{})[key];
+  delete (state.verifiedMonths||{})[key];
+  // 3) internal-transfer links touching removed tx
+  transferLinks=transferLinks.filter(l=>!removedTxIds.has(l.a)&&!removedTxIds.has(l.b));
+  transferUnlinked=transferUnlinked.filter(p=>{const [a,b]=String(p).split('|');return !removedTxIds.has(a)&&!removedTxIds.has(b);});
+  // 4) card-charge matching state touching removed tx or this card
+  cardChargeMatches=cardChargeMatches.filter(m=>!removedTxIds.has(m.bankTxId)&&m.cardKey!==key);
+  cardChargeUnmatched=cardChargeUnmatched.filter(id=>!removedTxIds.has(id));
+  Object.keys(cardChargeManual||{}).forEach(id=>{ if(removedTxIds.has(id)||cardChargeManual[id]===key) delete cardChargeManual[id]; });
+  cardChargeResolved=cardChargeResolved.filter(id=>!removedTxIds.has(id));
+  // 5) balance-gap explanations keyed by this account
+  Object.keys(gapExplanations||{}).forEach(k=>{ if(String(k).startsWith(key+'|')) delete gapExplanations[k]; });
+  // 6) remove the instance itself; drop the institution if it has no instances left
+  const store=(type==='bank')?state.bankInstances:state.cardInstances;
+  store[eid]=(store[eid]||[]).filter(i=>String(i.id)!==String(iid));
+  if((store[eid]||[]).length===0){
+    delete store[eid];
+    if(type==='bank'){ state.selectedBanks.delete(eid); if(isCustomBank(eid)) delete (state.customBanks||{})[eid]; }
+    else { state.selectedCards.delete(eid); if(isCustomCard(eid)) delete (state.customCards||{})[eid]; }
+  }
+  // 7) persist + recompute + re-render
+  saveState(); saveTx();
+  detectInternalTransfers(); detectCardChargeMatches();
+  closeDeleteAccount();
+  renderSettings();
+  if(document.getElementById('screen-dashboard')?.classList.contains('active')) renderDashboard();
+  showToast('🗑️ נמחק');
+}
+
 // ── Notes Archive ──
 function renderNotesArchive(){
   const div=document.getElementById('settings-notes');
@@ -4597,7 +4976,7 @@ function saveDigits(){
 function resetSetup(){
   if(!confirm('למחוק את כל ההגדרות והנתונים?'))return;
   try{localStorage.removeItem(STORAGE_KEY);localStorage.removeItem(TRANSACTIONS_KEY);}catch(e){}
-  state={currentStep:0,selectedBanks:new Set(),bankInstances:{},selectedCards:new Set(),cardInstances:{},startDate:'2026-01',reminder:'biweekly',setupDone:false,cardBankLinks:{},verifiedMonths:{},accountStarts:{}};
+  state={currentStep:0,selectedBanks:new Set(),bankInstances:{},selectedCards:new Set(),cardInstances:{},startDate:'2026-01',reminder:'biweekly',setupDone:false,cardBankLinks:{},verifiedMonths:{},accountStarts:{},accountEnds:{},customBanks:{},customCards:{}};
   transactions=[];uploadedFiles=[];pendingFiles=[];customCategories={};merchantOverrides={};supplierOverrides={};incomeOverrides={};customIncomeCats={};notesArchive=[];
   cardChargeMatches=[];cardChargeUnmatched=[];cardChargeManual={};cardChargeResolved=[];cardSettlementResolved=[];unmatchedSettlements=[];origFileKeys=new Set();idbClearAll();
   initOnboarding();showScreen('screen-onboarding');
@@ -4704,6 +5083,9 @@ async function saveToCloud(){
       cardBankLinks:state.cardBankLinks||{},
       verifiedMonths:state.verifiedMonths||{},
       accountStarts:state.accountStarts||{},
+      accountEnds:state.accountEnds||{},
+      customBanks:state.customBanks||{},
+      customCards:state.customCards||{},
       updatedAt: Date.now()
     });
     await setDoc(doc(db,'users',uid,'data','transactions'), {
@@ -4740,6 +5122,9 @@ async function loadFromCloud(uid){
           state.cardBankLinks = s.cardBankLinks||{};
           state.verifiedMonths = s.verifiedMonths||{};
           state.accountStarts = s.accountStarts||{};
+          state.accountEnds = s.accountEnds||{};
+          state.customBanks = s.customBanks||{};
+          state.customCards = s.customCards||{};
           _origSaveState();
         }
         const txSnap = await getDoc(doc(db,'users',uid,'data','transactions'));
