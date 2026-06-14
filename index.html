@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.42";
+const APP_VERSION = "2.43";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -1917,6 +1917,57 @@ function resolveOverlapByDelete(pendingId, existingId){
   showToast('🗑️ הדף הקיים נמחק — ממשיך בהעלאה');
   confirmUpload(pendingId);
 }
+
+// ── Statement-identity match (cards): same bank-charge summaries = same statement re-uploaded ──
+// chargeSummaries are the "סה"כ חיובים בתאריך .." lines — they stay stable even when we fix
+// per-transaction amounts, so they identify a statement far more reliably than per-tx signatures.
+function _chargeSig(list){
+  return (list||[]).filter(s=>s&&s.date&&Number(s.amount))
+    .map(s=>String(s.date).slice(0,10)+'|'+Math.round(Number(s.amount)*100))
+    .sort();
+}
+// Find an already-uploaded file on the same account whose charge-summaries match the new file's.
+// Returns the matching existing file, or null. Requires at least one charge summary to match.
+function findStatementMatch(accountKey, newChargeSummaries){
+  const newSig=_chargeSig(newChargeSummaries);
+  if(!newSig.length) return null;            // no summaries → can't use this method
+  const newSet=new Set(newSig);
+  let best=null, bestOverlap=0;
+  uploadedFiles.filter(f=>f.accountKey===accountKey).forEach(f=>{
+    const exSig=_chargeSig(f.chargeSummaries);
+    if(!exSig.length) return;
+    const overlap=exSig.filter(s=>newSet.has(s)).length;
+    if(overlap>bestOverlap){ bestOverlap=overlap; best=f; }
+  });
+  // require that the matched summaries cover most of the new statement (same statement, not a coincidental single shared charge date)
+  return (best && bestOverlap>0 && bestOverlap>=Math.ceil(newSig.length/2)) ? best : null;
+}
+// Prompt: "this statement already exists — replace?"  (delete old file+tx, then re-ingest)
+function showStatementReplace(pf, existingFile){
+  const assignDiv=document.getElementById('assign_'+pf.fileId);
+  if(!assignDiv)return;
+  const accName=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?a.name:'';};
+  const cnt=txIdsOfFile(existingFile.fileId).length;
+  const months=fileCoveredMonths(existingFile);
+  const mLabel=months.length?(months.length>1?months[0]+' – '+months[months.length-1]:months[0]):'';
+  assignDiv.innerHTML=`
+    <div style="padding:12px;background:var(--surface2);border-radius:10px;margin-top:8px;">
+      <div style="font-size:13px;font-weight:700;color:var(--amber);margin-bottom:6px;">⚠️ פירוט זה כבר קיים בכרטיס ${escHtml(accName(pf.assignedKey))}</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6;">
+        זיהיתי לפי חיובי הבנק שזהו אותו פירוט חודשי שכבר הועלה (${escHtml(existingFile.fileName||'דף קיים')}${mLabel?' · '+escHtml(mLabel):''} · ${cnt} פעולות).<br>
+        אם העלאה זו מתוקנת — אפשר <b>להחליף</b> את הקיים בחדש (הקודם יימחק והנתונים ייקלטו מחדש).
+      </div>
+      <button class="btn-confirm-upload" style="width:100%;background:var(--red-dim);color:var(--red);border:1px solid var(--red);margin-bottom:6px;" onclick="resolveOverlapByDelete('${pf.fileId}','${existingFile.fileId}')">🔄 החלף — מחק את הקיים והעלה מחדש</button>
+      <button class="btn-confirm-upload" style="width:100%;background:var(--surface3);color:var(--text2);border:1px solid var(--border2);" onclick="forceUploadKeepBoth('${pf.fileId}')">בכל זאת הוסף (ישמרו שניהם)</button>
+      <button class="btn-confirm-upload" style="width:100%;background:var(--surface2);color:var(--text3);border:1px solid var(--border);margin-top:6px;" onclick="removePendingFile('${pf.fileId}')">ביטול ההעלאה</button>
+    </div>`;
+}
+// user chose to ignore the statement-match warning and add anyway
+function forceUploadKeepBoth(fileId){
+  const pf=pendingFiles.find(f=>f.fileId===fileId);
+  if(pf) pf.statementMatchAcked=true;
+  confirmUpload(fileId);
+}
 // list of uploaded statements in Settings (each deletable)
 function renderUploadedFiles(){
   const div=document.getElementById('settings-files');
@@ -3088,6 +3139,14 @@ async function confirmUpload(fileId){
   const pf=pendingFiles.find(f=>f.fileId===fileId);
   if(!pf||!pf.assignedKey){showToast('⚠️ בחר חשבון תחילה','error');return;}
   const result=pf.aiResult||{};
+
+  // ── Statement-identity check (cards): same bank-charge summaries = same monthly statement re-uploaded ──
+  // Catches re-uploads even when per-transaction amounts changed (e.g. after a parser fix), because it
+  // matches on the stable "סה"כ חיובים בתאריך" lines. Per-tx dedup alone would miss this and duplicate the month.
+  if(!pf.statementMatchAcked && result.fileType==='card_statement'){
+    const stMatch=findStatementMatch(pf.assignedKey, result.chargeSummaries);
+    if(stMatch){ showStatementReplace(pf, stMatch); return; }
+  }
 
   // ── Date range + de-duplicate against transactions that already exist for this account ──
   const dr=result.estimatedDateRange||{from:getCurrentYYYYMM(),to:getCurrentYYYYMM()};
