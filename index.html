@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.35";
+const APP_VERSION = "2.37";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -1354,7 +1354,7 @@ function getAllAccounts() {
     const insts = state.bankInstances[id]||[{id:'default',digits:''}];
     insts.forEach((inst,i) => {
       accs.push({key:`bank_${id}_${inst.id}`, type:'bank', entityId:id, instIndex:i,
-        name: b.name+(insts.length>1?` ${i+1}`:''), icon:b.icon, digits:inst.digits, instId:inst.id});
+        name: b.name+(inst.digits?` ••${inst.digits}`:(insts.length>1?` ${i+1}`:'')), icon:b.icon, digits:inst.digits, instId:inst.id});
     });
   });
   state.selectedCards.forEach(id => {
@@ -1362,7 +1362,7 @@ function getAllAccounts() {
     const insts = state.cardInstances[id]||[{id:'default',digits:''}];
     insts.forEach((inst,i) => {
       accs.push({key:`card_${id}_${inst.id}`, type:'card', entityId:id, instIndex:i,
-        name: c.name+(insts.length>1?` ${i+1}`:''), icon:c.icon, digits:inst.digits, instId:inst.id});
+        name: c.name+(inst.digits?` ••${inst.digits}`:(insts.length>1?` ${i+1}`:'')), icon:c.icon, digits:inst.digits, instId:inst.id});
     });
   });
   return accs;
@@ -4431,7 +4431,7 @@ function renderCardResolve(){
   const matchedAll=(cardChargeMatches||[]).filter(m=>byId[m.bankTxId]);
   const link=(state.cardBankLinks||{});
   const byDateDesc=(a,b)=>((b.date||'').localeCompare(a.date||''));
-  const filledCell=(amtHtml,sub)=>`<div style="font-size:13px;font-weight:600;">${amtHtml}</div><div style="font-size:10px;color:var(--text3);">${sub}</div>`;
+  const filledCell=(amtHtml,sub)=>`<div style="font-size:13px;font-weight:600;">${amtHtml}</div><div style="font-size:10px;color:var(--text3);line-height:1.4;word-break:break-word;">${sub}</div>`;
   const emptyCell=`<div style="flex:1;border:1px dashed var(--border2);border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:11px;min-height:38px;">—</div>`;
 
   function bankSection(bankKey,bankLabel,bankIcon){
@@ -4459,44 +4459,50 @@ function renderCardResolve(){
           <button onclick="unmatchCardCharge('${bt.id}')" style="background:none;border:1px solid var(--border2);color:var(--text3);font-family:'Heebo';font-size:10px;padding:1px 8px;border-radius:6px;cursor:pointer;">בטל התאמה</button>
         </div>
         <div style="display:flex;gap:6px;align-items:stretch;">
-          <div style="flex:1;background:var(--green-dim);border-radius:9px;padding:6px 8px;">${filledCell(fmtAmount(bt.amount),fmtD(bt.date))}</div>
+          <div style="flex:1;background:var(--green-dim);border-radius:9px;padding:6px 8px;">${filledCell(fmtAmount(bt.amount),fmtD(bt.date)+(bt.desc?' · '+escHtml(''+bt.desc):''))}</div>
           <div style="width:22px;display:flex;align-items:center;justify-content:center;color:var(--green);">🔗</div>
           <div style="flex:1;background:var(--green-dim);border-radius:9px;padding:6px 8px;">${filledCell(fmtAmount(sAmt),(m.settleDate?fmtD(m.settleDate):'פירוט')+(m.grouped?` · ${m.grouped} שורות`:''))}</div>
         </div>
       </div>`;
     });
 
-    bUn.forEach(t=>{
+    // Two columns in parallel — bank charge (right) opposite Visa settlement (left), sorted by amount so equal sums line up
+    const bSorted=bUn.slice().sort((a,b)=>Math.abs(b.amount||0)-Math.abs(a.amount||0));
+    const sSorted=sUn.slice().sort((a,b)=>Math.abs(b.amount||0)-Math.abs(a.amount||0));
+    const bankCol=(t)=>{
+      if(!t) return emptyCell;
       const checked=p.bankTxId===t.id;
       const miss=!_cardDetailPresent(t);
-      h+=`<div style="margin-bottom:6px;">
-        <div style="display:flex;gap:6px;align-items:stretch;">
-          <label style="flex:1;display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid ${checked?'var(--green)':'var(--border2)'};border-radius:9px;padding:6px 8px;cursor:pointer;">
-            <input type="checkbox" ${checked?'checked':''} onclick="cmToggle('bank','${bankKey}','${t.id}')" style="width:16px;height:16px;flex:none;">
-            <span style="min-width:0;">${filledCell(fmtAmount(t.amount),fmtD(t.date)+(miss?' · חסר פירוט':''))}</span>
-          </label>
-          <div style="width:22px;"></div>
-          ${emptyCell}
-        </div>
+      const sub=fmtD(t.date)+(t.desc?' · '+escHtml(''+t.desc):'')+(miss?' · חסר פירוט':'');
+      return `<div style="flex:1;min-width:0;">
+        <label style="display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid ${checked?'var(--green)':'var(--border2)'};border-radius:9px;padding:6px 8px;cursor:pointer;">
+          <input type="checkbox" ${checked?'checked':''} onclick="cmToggle('bank','${bankKey}','${t.id}')" style="width:16px;height:16px;flex:none;">
+          <span style="min-width:0;">${filledCell(fmtAmount(t.amount),sub)}</span>
+        </label>
         <div style="text-align:right;margin-top:1px;"><button onclick="resolveChargeAsExpense('${t.id}')" style="background:none;border:none;color:var(--text3);font-family:'Heebo';font-size:10px;cursor:pointer;text-decoration:underline;">לא חיוב אשראי</button></div>
       </div>`;
-    });
-
-    sUn.forEach(s=>{
+    };
+    const visaCol=(s)=>{
+      if(!s) return emptyCell;
       const checked=p.sid===s.sid;
       const miss=!_bankStatementPresent(s);
-      h+=`<div style="margin-bottom:6px;">
-        <div style="display:flex;gap:6px;align-items:stretch;">
-          ${emptyCell}
-          <div style="width:22px;"></div>
-          <label style="flex:1;display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid ${checked?'var(--green)':'var(--border2)'};border-radius:9px;padding:6px 8px;cursor:pointer;">
-            <input type="checkbox" ${checked?'checked':''} onclick="cmToggle('visa','${bankKey}','${s.sid}','${s.cardKey}')" style="width:16px;height:16px;flex:none;">
-            <span style="min-width:0;">${filledCell(fmtAmount(-s.amount),escHtml(acN(s.cardKey))+' · '+fmtD(s.date)+(miss?' · חסר דף בנק':''))}</span>
-          </label>
-        </div>
+      const sub=escHtml(acN(s.cardKey))+' · '+fmtD(s.date)+(miss?' · חסר דף בנק':'');
+      return `<div style="flex:1;min-width:0;">
+        <label style="display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid ${checked?'var(--green)':'var(--border2)'};border-radius:9px;padding:6px 8px;cursor:pointer;">
+          <input type="checkbox" ${checked?'checked':''} onclick="cmToggle('visa','${bankKey}','${s.sid}','${s.cardKey}')" style="width:16px;height:16px;flex:none;">
+          <span style="min-width:0;">${filledCell(fmtAmount(-s.amount),sub)}</span>
+        </label>
         <div style="text-align:left;margin-top:1px;"><button onclick="resolveSettlement('${s.sid}')" style="background:none;border:none;color:var(--text3);font-family:'Heebo';font-size:10px;cursor:pointer;text-decoration:underline;">סמן כטופל</button></div>
       </div>`;
-    });
+    };
+    const rowsN=Math.max(bSorted.length,sSorted.length);
+    for(let i=0;i<rowsN;i++){
+      h+=`<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:6px;">
+        ${bankCol(bSorted[i])}
+        <div style="width:22px;flex:none;"></div>
+        ${visaCol(sSorted[i])}
+      </div>`;
+    }
 
     const ready=p.bankTxId&&p.sCardKey;
     if(bUn.length||sUn.length){
