@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.33";
+const APP_VERSION = "2.35";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -779,7 +779,7 @@ button{cursor:pointer;}
   <div class="rec-sticky">
     <div class="rec-head">
       <button class="rec-back" onclick="showDashboard()">→ חזרה</button>
-      <div><div class="rec-title">טיפול בחיובי אשראי</div><div class="rec-sub" id="cardresolve-sub"></div></div>
+      <div><div class="rec-title">התאמת חיובי אשראי</div><div class="rec-sub" id="cardresolve-sub"></div></div>
     </div>
   </div>
   <div style="padding:4px 16px 16px;" id="cardresolve-body"></div>
@@ -2239,7 +2239,7 @@ function renderWorklist(transferIds){
   if(countEl) countEl.textContent=`${all.length} פעולות לאישור · מעל ${WORKLIST_MIN} ₪`;
   const b=(v,l)=>`<button class="${worklistSort===v?'on':''}" onclick="setWorklistSort('${v}')">${l}</button>`;
   if(ctrlEl) ctrlEl.innerHTML=`<span class="wl-seg-lbl">מיון</span><div class="wl-seg">${b('suspect','חשד לטעות')}${b('repeat','חזרה')}${b('size','גודל')}${b('date','תאריך')}</div>`;
-  const cap=40;
+  const cap=10;
   const shown=all.slice(0,cap);
   cont.innerHTML = shown.map(t=>{
     const acc=getAllAccounts().find(a=>a.key===t.accountKey);
@@ -4348,36 +4348,22 @@ function renderCardMatchSection(){
     return;
   }
 
-  let html='';
-  if(matched.length){
-    html+=`<div style="font-size:12px;font-weight:700;color:var(--green);padding:4px 4px 6px;">✅ הותאמו לפירוט · מוחרגים מהסיכום</div>`;
-    html+=matched.map(m=>{
-      const bt=byId[m.bankTxId];
-      const diff=Math.round((Math.abs(bt.amount||0)-(m.settleAmount||0))*100)/100;
-      const tag=m.manual?' · ידני':'';
-      const stLabel = m.settleDate ? `סליקה ${fmtD(m.settleDate)}${m.grouped?` (${m.grouped} שורות)`:''}` : 'פירוט';
-      return `<div class="tx-row" style="align-items:center;">
-        <div class="tx-icon-wrap" style="background:var(--surface3)">💳</div>
-        <div style="min-width:0;flex:1;">
-          <div class="tx-name">${acN(bt.accountKey)} → ${acN(m.cardKey)}</div>
-          <div class="tx-meta">חיוב ${bt.date} · ${stLabel}${tag}${Math.abs(diff)>=1?` · פער ${fmtAmount(diff)}`:''}</div>
-        </div>
-        <div style="text-align:left;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-          <div class="tx-amount" style="color:var(--text2)">${fmtAmount(bt.amount)}</div>
-          <button onclick="unmatchCardCharge('${bt.id}')" style="background:none;border:1px solid var(--border2);color:var(--text3);font-family:'Heebo';font-size:11px;padding:2px 8px;border-radius:6px;cursor:pointer;">בטל התאמה</button>
-        </div>
-      </div>`;
-    }).join('');
-    html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 4px 2px;border-top:1px solid var(--border);margin-top:6px;">
-      <span style="font-size:12px;color:var(--text2);">סך שהותאם: ${fmtAmount(totMatched)}</span>
-      <span style="font-size:13px;font-weight:700;color:var(--text2);">מוחרג מהסיכום</span>
-    </div>`;
-  }
-
-  if(pending){
-    html+=`<button onclick="showCardResolve()" style="width:100%;margin-top:${matched.length?'10':'0'}px;background:var(--amber-dim,rgba(245,158,11,.12));border:1px solid var(--amber);color:var(--amber);font-family:'Heebo';font-size:14px;font-weight:700;padding:12px;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">⚠️ ${pending} פריטים לבירור — לטיפול ידני ←</button>`;
-  }
-  html+=`<div style="text-align:center;margin-top:8px;"><button class="reassign-new" style="display:inline-block;width:auto;padding:6px 14px;font-size:12px;" onclick="rescanCardMatches()">🔄 סרוק מחדש</button></div>`;
+  // Compact summary only — full detail lives in the dedicated matching screen.
+  let html=`<div onclick="showCardResolve()" style="cursor:pointer;">
+    <div style="display:flex;gap:10px;">
+      <div style="flex:1;background:var(--surface2);border-radius:12px;padding:10px;">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:4px;"><span style="color:var(--green);">✅</span> הותאמו</div>
+        <div style="font-size:20px;font-weight:700;">${matched.length}</div>
+        <div style="font-size:12px;color:var(--text3);">${fmtAmount(totMatched)}</div>
+      </div>
+      <div style="flex:1;background:var(--surface2);border-radius:12px;padding:10px;">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:4px;"><span style="color:var(--amber);">⚠️</span> לא הותאמו</div>
+        <div style="font-size:20px;font-weight:700;">${pending}</div>
+        <div style="font-size:12px;color:var(--text3);">לבירור</div>
+      </div>
+    </div>
+    <div style="margin-top:10px;background:var(--blue-dim);color:var(--blue);text-align:center;font-size:13px;font-weight:700;padding:11px;border-radius:12px;">פתח מסך התאמות ←</div>
+  </div>`;
   host.innerHTML=html;
 }
 
@@ -4406,92 +4392,159 @@ function _bankStatementPresent(settle){
   return (uploadedFiles||[]).some(f=> bankKeys.has(f.accountKey) && fileCoveredMonths(f).includes(ym));
 }
 
+// ── Manual matching screen — organised BY BANK (each card is linked to a bank; many cards can share one bank) ──
+// Two-sided table per bank: bank credit-card charges  ↔  card-statement (Visa) settlement lines.
+// Matching is one-to-one and may cross months (a statement dated 30/04 can settle in the bank on 01/05).
+let cmPick={}; // {bankKey:{bankTxId, sid, sCardKey}} — current checkbox selection, per bank section
+function cmToggle(side,bankKey,id,cardKey){
+  cmPick[bankKey]=cmPick[bankKey]||{bankTxId:null,sid:null,sCardKey:null};
+  const p=cmPick[bankKey];
+  if(side==='bank'){ p.bankTxId=(p.bankTxId===id)?null:id; }
+  else { if(p.sid===id){p.sid=null;p.sCardKey=null;} else {p.sid=id;p.sCardKey=cardKey;} }
+  renderCardResolve();
+}
+function cmDoMatch(bankKey){
+  const p=cmPick[bankKey]; if(!p||!p.bankTxId||!p.sCardKey) return;
+  const tx=p.bankTxId, ck=p.sCardKey;
+  cmPick[bankKey]={bankTxId:null,sid:null,sCardKey:null};
+  matchChargeToSettlement(tx,ck);
+}
+// Pair a specific bank charge with a card (the selected settlement's card). Reuses the manual-link mechanism.
+function matchChargeToSettlement(bankTxId,cardKey){
+  cardChargeManual[bankTxId]=cardKey;
+  cardChargeUnmatched=cardChargeUnmatched.filter(id=>id!==bankTxId);
+  cardChargeResolved=cardChargeResolved.filter(id=>id!==bankTxId);
+  detectCardChargeMatches(); saveTx(); rerenderCardScreens();
+  showToast('🔗 הותאם');
+}
+
 function renderCardResolve(){
   const host=document.getElementById('cardresolve-body'); if(!host)return;
-  const fmtD=d=>{const p=(d||'').split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0].slice(2)}`:(d||'');};
-  const acN=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?(a.icon+' '+a.name):'חשבון';};
-  const {debits,credits}=getUnmatchedBankCardTx();
+  const fmtD=d=>{const p=(d||'').split('-');return p.length===3?`${p[2]}/${p[1]}`:(d||'');};
+  const acN=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?a.name:'חשבון';};
   const byId={}; transactions.forEach(t=>byId[t.id]=t);
 
-  const bankRow=(t,kind,missingNote)=>{
-    const word = kind==='credit' ? 'הכנסה' : 'הוצאה';
-    const note = missingNote ? `<div class="tx-meta" style="color:var(--amber);">${missingNote}</div>` : '';
-    return `<div class="tx-card" style="margin-bottom:8px;padding:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-        <div style="min-width:0;flex:1;">
-          <div class="tx-name">${escHtml(acN(t.accountKey))}</div>
-          <div class="tx-meta">${t.date}${t.desc?' · '+escHtml(t.desc):''}</div>${note}
+  const banks=getAllAccounts().filter(a=>a.type==='bank');
+  const {debits,credits}=getUnmatchedBankCardTx();
+  const bankUnmatchedAll=[...debits,...credits];
+  const settles=(unmatchedSettlements||[]).slice();
+  const matchedAll=(cardChargeMatches||[]).filter(m=>byId[m.bankTxId]);
+  const link=(state.cardBankLinks||{});
+  const byDateDesc=(a,b)=>((b.date||'').localeCompare(a.date||''));
+  const filledCell=(amtHtml,sub)=>`<div style="font-size:13px;font-weight:600;">${amtHtml}</div><div style="font-size:10px;color:var(--text3);">${sub}</div>`;
+  const emptyCell=`<div style="flex:1;border:1px dashed var(--border2);border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:11px;min-height:38px;">—</div>`;
+
+  function bankSection(bankKey,bankLabel,bankIcon){
+    const matched=matchedAll.filter(m=>byId[m.bankTxId].accountKey===bankKey).sort((a,b)=>byDateDesc(byId[a.bankTxId],byId[b.bankTxId]));
+    const bUn=bankUnmatchedAll.filter(t=>t.accountKey===bankKey).sort(byDateDesc);
+    const sUn=settles.filter(s=>link[s.cardKey]===bankKey).sort(byDateDesc);
+    if(!matched.length && !bUn.length && !sUn.length) return '';
+    const p=cmPick[bankKey]||{};
+    const linkedCards=getAllAccounts().filter(a=>a.type==='card' && link[a.key]===bankKey).map(a=>a.name);
+    const open=bUn.length+sUn.length;
+    let h=`<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:12px;margin-bottom:12px;">`;
+    h+=`<div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:18px;">${bankIcon}</span><span style="font-size:14px;font-weight:700;">${escHtml(bankLabel)}</span></div>
+      ${open?`<span style="font-size:11px;color:var(--amber);">${open} לבירור</span>`:`<span style="font-size:11px;color:var(--green);">הכל הותאם ✓</span>`}</div>`;
+    h+=`<div style="font-size:11px;color:var(--text3);margin:2px 0 10px;">${linkedCards.length?('כרטיסים: '+linkedCards.map(escHtml).join(' · ')):'אין כרטיסים מקושרים'}</div>`;
+    h+=`<div style="display:flex;gap:6px;font-size:11px;color:var(--text2);font-weight:600;padding:0 2px 4px;"><div style="flex:1;text-align:center;">חיוב בבנק</div><div style="width:22px;"></div><div style="flex:1;text-align:center;">פירוט הויזה</div></div>`;
+
+    matched.forEach(m=>{
+      const bt=byId[m.bankTxId];
+      const sAmt = bt.amount<0 ? -Math.abs(m.settleAmount||0) : Math.abs(m.settleAmount||0);
+      const diff=Math.round((Math.abs(bt.amount||0)-Math.abs(m.settleAmount||0))*100)/100;
+      h+=`<div style="margin-bottom:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+          <span style="font-size:11px;font-weight:700;color:var(--green);">✓ מותאם${m.manual?' · ידני':''}${Math.abs(diff)>=1?` · פער ${fmtAmount(diff)}`:''}</span>
+          <button onclick="unmatchCardCharge('${bt.id}')" style="background:none;border:1px solid var(--border2);color:var(--text3);font-family:'Heebo';font-size:10px;padding:1px 8px;border-radius:6px;cursor:pointer;">בטל התאמה</button>
         </div>
-        <div class="tx-amount" style="color:${kind==='credit'?'var(--green)':'var(--red)'};white-space:nowrap;">${fmtAmount(t.amount)}</div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:10px;">
-        <button onclick="linkChargeToCard('${t.id}')" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Heebo';font-size:13px;padding:8px;border-radius:8px;cursor:pointer;">🔗 קשר לכרטיס</button>
-        <button onclick="resolveChargeAsExpense('${t.id}')" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Heebo';font-size:13px;padding:8px;border-radius:8px;cursor:pointer;">➡️ הכרע כ${word}</button>
-      </div>
-    </div>`;
-  };
-  const settleRow=(s,missingNote)=>{
-    const note = missingNote ? `<div class="tx-meta" style="color:var(--amber);">${missingNote}</div>` : '';
-    return `<div class="tx-card" style="margin-bottom:8px;padding:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-        <div style="min-width:0;flex:1;">
-          <div class="tx-name">${escHtml(acN(s.cardKey))}</div>
-          <div class="tx-meta">סליקה ${fmtD(s.date)} · ${s.amount<0?'זיכוי':'חיוב'} · לא נמצא בבנק</div>${note}
+        <div style="display:flex;gap:6px;align-items:stretch;">
+          <div style="flex:1;background:var(--green-dim);border-radius:9px;padding:6px 8px;">${filledCell(fmtAmount(bt.amount),fmtD(bt.date))}</div>
+          <div style="width:22px;display:flex;align-items:center;justify-content:center;color:var(--green);">🔗</div>
+          <div style="flex:1;background:var(--green-dim);border-radius:9px;padding:6px 8px;">${filledCell(fmtAmount(sAmt),(m.settleDate?fmtD(m.settleDate):'פירוט')+(m.grouped?` · ${m.grouped} שורות`:''))}</div>
         </div>
-        <div class="tx-amount" style="color:var(--text2);white-space:nowrap;">${fmtAmount(-s.amount)}</div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:10px;">
-        <button onclick="resolveSettlement('${s.sid}')" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Heebo';font-size:13px;padding:8px;border-radius:8px;cursor:pointer;">✓ סמן כטופל</button>
-      </div>
-    </div>`;
-  };
+      </div>`;
+    });
 
-  // split each list: counterpart present (genuine mismatch) vs counterpart missing (likely missing upload)
-  const dR=[],dM=[]; debits.forEach(t=> (_cardDetailPresent(t)?dR:dM).push(t));
-  const cR=[],cM=[]; credits.forEach(t=> (_cardDetailPresent(t)?cR:cM).push(t));
-  const us=(unmatchedSettlements||[]).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  const sR=[],sM=[]; us.forEach(s=> (_bankStatementPresent(s)?sR:sM).push(s));
+    bUn.forEach(t=>{
+      const checked=p.bankTxId===t.id;
+      const miss=!_cardDetailPresent(t);
+      h+=`<div style="margin-bottom:6px;">
+        <div style="display:flex;gap:6px;align-items:stretch;">
+          <label style="flex:1;display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid ${checked?'var(--green)':'var(--border2)'};border-radius:9px;padding:6px 8px;cursor:pointer;">
+            <input type="checkbox" ${checked?'checked':''} onclick="cmToggle('bank','${bankKey}','${t.id}')" style="width:16px;height:16px;flex:none;">
+            <span style="min-width:0;">${filledCell(fmtAmount(t.amount),fmtD(t.date)+(miss?' · חסר פירוט':''))}</span>
+          </label>
+          <div style="width:22px;"></div>
+          ${emptyCell}
+        </div>
+        <div style="text-align:right;margin-top:1px;"><button onclick="resolveChargeAsExpense('${t.id}')" style="background:none;border:none;color:var(--text3);font-family:'Heebo';font-size:10px;cursor:pointer;text-decoration:underline;">לא חיוב אשראי</button></div>
+      </div>`;
+    });
 
-  let html='';
-  const sec=(title,color,n)=>`<div class="cardres-sec"${color?` style="color:${color};"`:''}>${title} · ${n}</div>`;
+    sUn.forEach(s=>{
+      const checked=p.sid===s.sid;
+      const miss=!_bankStatementPresent(s);
+      h+=`<div style="margin-bottom:6px;">
+        <div style="display:flex;gap:6px;align-items:stretch;">
+          ${emptyCell}
+          <div style="width:22px;"></div>
+          <label style="flex:1;display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid ${checked?'var(--green)':'var(--border2)'};border-radius:9px;padding:6px 8px;cursor:pointer;">
+            <input type="checkbox" ${checked?'checked':''} onclick="cmToggle('visa','${bankKey}','${s.sid}','${s.cardKey}')" style="width:16px;height:16px;flex:none;">
+            <span style="min-width:0;">${filledCell(fmtAmount(-s.amount),escHtml(acN(s.cardKey))+' · '+fmtD(s.date)+(miss?' · חסר דף בנק':''))}</span>
+          </label>
+        </div>
+        <div style="text-align:left;margin-top:1px;"><button onclick="resolveSettlement('${s.sid}')" style="background:none;border:none;color:var(--text3);font-family:'Heebo';font-size:10px;cursor:pointer;text-decoration:underline;">סמן כטופל</button></div>
+      </div>`;
+    });
 
-  html+=sec('חיובי בנק לבירור (חובה)','',dR.length);
-  html += dR.length ? dR.map(t=>bankRow(t,'debit')).join('') : `<div class="empty-state" style="padding:10px;">אין חיובים לבירור</div>`;
-  html+=sec('זיכויי בנק לבירור (זכות)','var(--green)',cR.length);
-  html += cR.length ? cR.map(t=>bankRow(t,'credit')).join('') : `<div class="empty-state" style="padding:10px;">אין זיכויים לבירור</div>`;
-  html+=sec('שורות בפירוט שלא נמצאו בבנק','var(--amber)',sR.length);
-  html += sR.length ? sR.map(s=>settleRow(s)).join('') : `<div class="empty-state" style="padding:10px;">אין שורות פתוחות</div>`;
-
-  // Separate bottom table — items where one side simply wasn't uploaded
-  const missingCount=dM.length+cM.length+sM.length;
-  if(missingCount){
-    html+=`<div class="cardres-sec" style="color:var(--text3);border-top:1px solid var(--border);margin-top:14px;padding-top:14px;">יתכן וחסרים נתונים · ${missingCount}</div>`;
-    html+=`<div style="font-size:11px;color:var(--text3);padding:0 4px 8px;line-height:1.5;">בהתאמות אלה צד אחד לא הועלה — חסר פירוט אשראי או דף בנק לתקופה — וייתכן שזו הסיבה לחוסר ההתאמה. השלמת הקובץ החסר אמורה לסגור אותן אוטומטית.</div>`;
-    html+=dM.map(t=>bankRow(t,'debit','חסר פירוט אשראי לתקופה')).join('');
-    html+=cM.map(t=>bankRow(t,'credit','חסר פירוט אשראי לתקופה')).join('');
-    html+=sM.map(s=>settleRow(s,'חסר דף בנק לתקופה')).join('');
+    const ready=p.bankTxId&&p.sCardKey;
+    if(bUn.length||sUn.length){
+      h+=`<button ${ready?'':'disabled'} onclick="cmDoMatch('${bankKey}')" style="width:100%;margin-top:4px;background:${ready?'var(--green)':'var(--surface2)'};color:${ready?'#04150d':'var(--text3)'};border:1px solid ${ready?'var(--green)':'var(--border2)'};font-family:'Heebo';font-weight:700;font-size:13px;padding:9px;border-radius:10px;cursor:${ready?'pointer':'default'};">✓ התאם מסומנים</button>`;
+    }
+    h+=`</div>`;
+    return h;
   }
 
-  // resolved / manual — undo
+  let html='';
+  banks.forEach(b=>{ html+=bankSection(b.key, b.icon+' '+b.name, b.icon); });
+
+  // Settlements whose card has no linked bank — can't be auto-placed under a bank
+  const noBank=settles.filter(s=>!link[s.cardKey]).sort(byDateDesc);
+  if(noBank.length){
+    html+=`<div style="background:var(--surface);border:1px solid var(--amber);border-radius:14px;padding:12px;margin-bottom:12px;">
+      <div style="font-size:14px;font-weight:700;color:var(--amber);">⚠️ ללא בנק מקושר</div>
+      <div style="font-size:11px;color:var(--text3);margin:2px 0 10px;">קשר את הכרטיס לחשבון בנק בהגדרות כדי לאפשר התאמה</div>`;
+    noBank.forEach(s=>{
+      html+=`<div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;padding:7px 9px;margin-bottom:6px;">
+        <div>${filledCell(fmtAmount(-s.amount),escHtml(acN(s.cardKey))+' · '+fmtD(s.date))}</div>
+        <button onclick="resolveSettlement('${s.sid}')" style="background:none;border:1px solid var(--border2);color:var(--text3);font-family:'Heebo';font-size:11px;padding:2px 8px;border-radius:6px;cursor:pointer;">סמן כטופל</button>
+      </div>`;
+    });
+    html+=`</div>`;
+  }
+
+  // Manually resolved / linked — with undo
   const manualIds=Object.keys(cardChargeManual||{}).filter(id=>byId[id]);
   const resolvedIds=(cardChargeResolved||[]).filter(id=>byId[id]);
-  if(manualIds.length||resolvedIds.length){
-    html+=`<div class="cardres-sec" style="color:var(--text3);">הוכרעו ידנית · ${manualIds.length+resolvedIds.length}</div>`;
-    const rowDone=(id,label)=>{const t=byId[id];return `<div class="tx-row" style="align-items:center;">
+  if(resolvedIds.length){
+    html+=`<div class="cardres-sec" style="color:var(--text3);">הוכרעו כהוצאה/הכנסה · ${resolvedIds.length}</div>`;
+    resolvedIds.forEach(id=>{const t=byId[id];
+      html+=`<div class="tx-row" style="align-items:center;">
         <div class="tx-icon-wrap" style="background:var(--surface3)">💳</div>
-        <div style="min-width:0;flex:1;"><div class="tx-name">${escHtml(acN(t.accountKey))}</div>
-        <div class="tx-meta">${t.date} · ${label}</div></div>
+        <div style="min-width:0;flex:1;"><div class="tx-name">${escHtml(acN(t.accountKey))}</div><div class="tx-meta">${t.date} · הוכרע כהוצאה/הכנסה</div></div>
         <div style="text-align:left;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
           <div class="tx-amount" style="color:var(--text2)">${fmtAmount(t.amount)}</div>
           <button onclick="undoCardResolution('${id}')" style="background:none;border:1px solid var(--border2);color:var(--text3);font-family:'Heebo';font-size:11px;padding:2px 8px;border-radius:6px;cursor:pointer;">↩️ החזר לבירור</button>
-        </div></div>`;};
-    html+=manualIds.map(id=>rowDone(id,'קושר לכרטיס')).join('');
-    html+=resolvedIds.map(id=>rowDone(id,'הוכרע כהוצאה/הכנסה')).join('');
+        </div></div>`;
+    });
   }
+
+  if(!html.trim()) html=`<div class="empty-state" style="padding:24px;">אין חיובים לבירור 🎉<br><span style="font-size:11px;color:var(--text3);">כל חיובי האשראי הותאמו לפירוטים</span></div>`;
 
   html+=`<div style="text-align:center;margin:14px 0 4px;"><button class="reassign-new" style="display:inline-block;width:auto;padding:8px 16px;font-size:12px;" onclick="rescanCardMatches()">🔄 סרוק מחדש</button></div>`;
   host.innerHTML=html;
-  const sub=document.getElementById('cardresolve-sub'); if(sub) sub.textContent=getCardResolveCount()+' פריטים פתוחים';
+  const sub=document.getElementById('cardresolve-sub'); if(sub) sub.textContent=getCardResolveCount()+' פריטים לבירור';
 }
 
 // ── Category drill-down ──
