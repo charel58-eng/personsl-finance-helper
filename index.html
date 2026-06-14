@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.39";
+const APP_VERSION = "2.42";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -214,6 +214,7 @@ button{cursor:pointer;}
 .wl-trust{background:var(--blue-dim);color:var(--blue);border:1px solid var(--blue-glow);border-radius:9px;font-family:'Heebo';font-size:11px;font-weight:700;padding:6px 10px;cursor:pointer;white-space:nowrap;}
 .wl-trust:active{opacity:.7;}
 #screen-reconcile{padding-top:calc(env(safe-area-inset-top,0px) + var(--userbar-h));}
+.rec-sticky{position:sticky;top:calc(env(safe-area-inset-top,0px) + var(--userbar-h));z-index:40;background:rgba(9,10,18,0.97);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);}
 .rec-head{display:flex;align-items:center;gap:10px;padding:6px 16px 4px;}
 .rec-ctrls{display:flex;flex-wrap:wrap;gap:8px;padding:2px 16px 6px;align-items:center;}
 .rec-seg{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:2px;gap:2px;}
@@ -380,6 +381,16 @@ button{cursor:pointer;}
 .settings-row-name{font-size:14px;font-weight:700;}
 .settings-edit-btn{font-size:12px;color:var(--green);font-weight:600;cursor:pointer;}
 .settings-instances{margin-top:10px;display:flex;flex-direction:column;gap:6px;}
+.set-nav-row{display:flex;align-items:center;gap:12px;background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:15px 16px;margin-bottom:9px;cursor:pointer;transition:background .15s;}
+.set-nav-row:active{background:var(--surface2);}
+.set-nav-ico{font-size:20px;flex-shrink:0;width:26px;text-align:center;}
+.set-nav-txt{flex:1;min-width:0;}
+.set-nav-name{font-size:15px;font-weight:700;}
+.set-nav-sub{font-size:11.5px;color:var(--text3);margin-top:1px;}
+.set-nav-arrow{font-size:20px;color:var(--text3);flex-shrink:0;}
+.cat-search-wrap{padding:0 2px 10px;}
+.cat-search-input{width:100%;padding:11px 14px;background:var(--surface2);border:1.5px solid var(--border2);border-radius:12px;color:var(--text);font-family:'Heebo';font-size:14px;}
+.cat-search-input::placeholder{color:var(--text3);}
 .si-row{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface2);border-radius:10px;}
 .si-icon{font-size:14px;}
 .si-name{flex:1;font-size:13px;font-weight:600;}
@@ -1012,29 +1023,153 @@ button{cursor:pointer;}
     <div class="page-title">⚙️ הגדרות</div>
   </div>
 
+  <!-- Quick add buttons stay on main settings -->
   <div class="settings-section">
-    <div class="settings-section-label">חשבונות בנק</div>
+    <button class="btn-add-acc" onclick="openAddAccountModal('bank')">➕ הוסף חשבון בנק</button>
+    <button class="btn-add-acc" onclick="openAddAccountModal('card')" style="margin-top:8px;">➕ הוסף כרטיס אשראי</button>
+  </div>
+
+  <!-- Sub-menu navigation rows -->
+  <div class="settings-section">
+    <div class="set-nav-row" onclick="openSettingsSub('banks')">
+      <div class="set-nav-ico">🏦</div>
+      <div class="set-nav-txt"><div class="set-nav-name">חשבונות בנק</div><div class="set-nav-sub">ניהול חשבונות, ספרות, תאריכים</div></div>
+      <div class="set-nav-arrow">‹</div>
+    </div>
+    <div class="set-nav-row" onclick="openSettingsSub('cards')">
+      <div class="set-nav-ico">💳</div>
+      <div class="set-nav-txt"><div class="set-nav-name">כרטיסי אשראי</div><div class="set-nav-sub">ניהול כרטיסים וקישור לחשבון</div></div>
+      <div class="set-nav-arrow">‹</div>
+    </div>
+    <div class="set-nav-row" onclick="openSettingsSub('cats')">
+      <div class="set-nav-ico">🏷️</div>
+      <div class="set-nav-txt"><div class="set-nav-name">ניהול סעיפים</div><div class="set-nav-sub">שמות קטגוריות הוצאות והכנסות</div></div>
+      <div class="set-nav-arrow">‹</div>
+    </div>
+    <div class="set-nav-row" onclick="openSettingsSub('notes')">
+      <div class="set-nav-ico">📋</div>
+      <div class="set-nav-txt"><div class="set-nav-name">ארכיון הערות</div><div class="set-nav-sub">הערות שנשמרו מבדיקות התאמות</div></div>
+      <div class="set-nav-arrow">‹</div>
+    </div>
+    <div class="set-nav-row" onclick="openSettingsSub('files')">
+      <div class="set-nav-ico">📄</div>
+      <div class="set-nav-txt"><div class="set-nav-name">דפים שהועלו</div><div class="set-nav-sub">קבצים שנקלטו במערכת</div></div>
+      <div class="set-nav-arrow">‹</div>
+    </div>
+    <div class="set-nav-row" onclick="openSettingsSub('general')">
+      <div class="set-nav-ico">⚙️</div>
+      <div class="set-nav-txt"><div class="set-nav-name">כללי ומתקדם</div><div class="set-nav-sub">תזכורות, תאריך התחלה, איפוס</div></div>
+      <div class="set-nav-arrow">‹</div>
+    </div>
+  </div>
+
+  <div style="text-align:center;padding:16px;font-size:11px;color:var(--text3);" id="settings-version">גרסה —</div>
+
+  <div class="bottom-nav">
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
+    <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
+    <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
+    <div class="nav-item active"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
+  </div>
+</div>
+
+<!-- ═══ SETTINGS SUB: BANKS ═══ -->
+<div class="screen" id="screen-set-banks">
+  <div class="upload-header">
+    <div class="back-btn" onclick="showSettings()">←</div>
+    <div class="page-title">🏦 חשבונות בנק</div>
+  </div>
+  <div class="settings-section">
     <div id="settings-banks"></div>
     <button class="btn-add-acc" onclick="openAddAccountModal('bank')">➕ הוסף חשבון בנק</button>
   </div>
+  <div class="bottom-nav">
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
+    <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
+    <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
+    <div class="nav-item active"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
+  </div>
+</div>
+
+<!-- ═══ SETTINGS SUB: CARDS ═══ -->
+<div class="screen" id="screen-set-cards">
+  <div class="upload-header">
+    <div class="back-btn" onclick="showSettings()">←</div>
+    <div class="page-title">💳 כרטיסי אשראי</div>
+  </div>
   <div class="settings-section">
-    <div class="settings-section-label">כרטיסי אשראי</div>
     <div id="settings-cards"></div>
     <button class="btn-add-acc" onclick="openAddAccountModal('card')">➕ הוסף כרטיס אשראי</button>
   </div>
-  <div class="settings-section">
-    <div class="settings-section-label">📋 ארכיון הערות</div>
-    <div id="settings-notes"></div>
+  <div class="bottom-nav">
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
+    <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
+    <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
+    <div class="nav-item active"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
+  </div>
+</div>
+
+<!-- ═══ SETTINGS SUB: CATEGORIES ═══ -->
+<div class="screen" id="screen-set-cats">
+  <div class="upload-header">
+    <div class="back-btn" onclick="showSettings()">←</div>
+    <div class="page-title">🏷️ ניהול סעיפים</div>
   </div>
   <div class="settings-section">
-    <div class="settings-section-label">📄 דפים שהועלו</div>
-    <div id="settings-files"></div>
-  </div>
-  <div class="settings-section">
-    <div class="settings-section-label">🏷️ ניהול סעיפים (שמות)</div>
+    <div class="cat-search-wrap">
+      <input type="text" class="cat-search-input" id="cat-search" placeholder="🔍 חפש סעיף…" oninput="renderCategoriesManager()">
+    </div>
     <div class="settings-row">
       <div id="settings-categories"></div>
     </div>
+  </div>
+  <div class="bottom-nav">
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
+    <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
+    <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
+    <div class="nav-item active"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
+  </div>
+</div>
+
+<!-- ═══ SETTINGS SUB: NOTES ═══ -->
+<div class="screen" id="screen-set-notes">
+  <div class="upload-header">
+    <div class="back-btn" onclick="showSettings()">←</div>
+    <div class="page-title">📋 ארכיון הערות</div>
+  </div>
+  <div class="settings-section">
+    <div id="settings-notes"></div>
+  </div>
+  <div class="bottom-nav">
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
+    <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
+    <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
+    <div class="nav-item active"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
+  </div>
+</div>
+
+<!-- ═══ SETTINGS SUB: FILES ═══ -->
+<div class="screen" id="screen-set-files">
+  <div class="upload-header">
+    <div class="back-btn" onclick="showSettings()">←</div>
+    <div class="page-title">📄 דפים שהועלו</div>
+  </div>
+  <div class="settings-section">
+    <div id="settings-files"></div>
+  </div>
+  <div class="bottom-nav">
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
+    <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
+    <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
+    <div class="nav-item active"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
+  </div>
+</div>
+
+<!-- ═══ SETTINGS SUB: GENERAL ═══ -->
+<div class="screen" id="screen-set-general">
+  <div class="upload-header">
+    <div class="back-btn" onclick="showSettings()">←</div>
+    <div class="page-title">⚙️ כללי ומתקדם</div>
   </div>
   <div class="settings-section">
     <div class="settings-section-label">כללי</div>
@@ -1055,14 +1190,10 @@ button{cursor:pointer;}
     <div class="settings-section-label">פיתוח / בדיקה</div>
     <button class="btn-danger" style="background:var(--blue-dim);border-color:var(--blue);color:var(--blue);margin-bottom:8px;" onclick="runSimulation()">🧪 טען מצב סימולציה (ינואר–מאי)</button>
   </div>
-
   <div class="settings-section">
     <div class="settings-section-label">אזור מסוכן</div>
     <button class="btn-danger" onclick="resetSetup()">🔄 איפוס והגדרה מחדש</button>
   </div>
-
-  <div style="text-align:center;padding:16px;font-size:11px;color:var(--text3);" id="settings-version">גרסה —</div>
-
   <div class="bottom-nav">
     <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
     <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
@@ -2136,6 +2267,37 @@ function showDashboard(){showScreen('screen-dashboard');renderDashboard();}
 function showChat(){showScreen('screen-chat');if(typeof chatHistory!=='undefined'&&chatHistory.length===0){addChatMsg('ai','שלום! אני העוזר הפיננסי שלך 🧠\nשאל אותי כל שאלה על ההוצאות שלך!');updateChatSub();}}
 function showUpload(){showScreen('screen-upload');renderUploadScreen();}
 function showSettings(){showScreen('screen-settings');renderSettings();}
+function openSettingsSub(which){
+  const map={
+    banks:'screen-set-banks', cards:'screen-set-cards', cats:'screen-set-cats',
+    notes:'screen-set-notes', files:'screen-set-files', general:'screen-set-general'
+  };
+  const scr=map[which]; if(!scr) return;
+  showScreen(scr);
+  // populate the relevant content for this sub-screen
+  if(which==='banks'||which==='cards') renderSettings();
+  else if(which==='cats'){ const s=document.getElementById('cat-search'); if(s) s.value=''; renderCategoriesManager(); }
+  else if(which==='notes') renderNotesArchive();
+  else if(which==='files') renderUploadedFiles();
+  else if(which==='general') renderGeneralSettings();
+}
+function renderGeneralSettings(){
+  const remLabels={weekly:'שבועי',biweekly:'פעמיים בחודש',monthly:'חודשי',manual:'ידני'};
+  const rv=document.getElementById('settings-reminder-val'); if(rv) rv.textContent=remLabels[state.reminder]||'—';
+  const sv=document.getElementById('settings-start-date-val');
+  if(sv){ const d=new Date(state.startDate+'-01'); sv.textContent=d.toLocaleDateString('he-IL',{year:'numeric',month:'long'}); }
+}
+// True if the main settings screen OR any settings sub-screen is active
+function settingsScreenActive(){
+  return ['screen-settings','screen-set-banks','screen-set-cards','screen-set-cats','screen-set-notes','screen-set-files','screen-set-general']
+    .some(id=>document.getElementById(id)?.classList.contains('active'));
+}
+// Re-render whichever settings content is currently visible
+function refreshActiveSettings(){
+  if(!settingsScreenActive()) return;
+  renderSettings();
+  renderGeneralSettings();
+}
 
 // ═══════════════════════════
 //  DASHBOARD RENDER
@@ -2658,7 +2820,20 @@ ${contentForAI}
 6. cardChargesInBank = רק אם זה דף בנק: כל החיובים שנראים כחיוב כרטיס אשראי (ויזה/מאסטרקארד/ישראכרט/מקס/כאל/דיינרס/אמקס), כולל חיובי חו"ל נפרדים
 6ב. chargeSummaries = רק אם זה דף כרטיס אשראי (card_statement): חלץ כל שורת **סיכום** שמציינת סכום כולל שנגבה/זוכה מחשבון הבנק בתאריך מסוים. הניסוח משתנה בין כרטיסים — קבל את כולם: "סה"כ חיוב לחשבון __ בתאריך DD/MM/YY : ____ ₪", "סה"כ חיובים בתאריך DD/MM/YY ____ ₪", "סה"כ לחיוב/לתשלום/לזיכוי בתאריך". כל שורה כזו בנפרד, גם אם יש כמה באותו תאריך (חיובי חו"ל וחיובי הארץ נגבים בנפרד). amount חיובי = חיוב לחשבון (יורד בבנק), amount שלילי = זיכוי לחשבון (נכנס לבנק — שמור על המינוס). date = תאריך החיוב/הזיכוי. **חשוב: אל תכלול שורות של חיוב עתידי / "לידיעה" / "תאריך חיוב ראשון" — אלה ייגבו בעתיד ואינם חלק מהדף הזה.** chargeSummaries הן שורות הסיכום בלבד, לא עסקאות בודדות.
 7. החזר JSON תקין בלבד
-8. סימן הסכום קריטי: קבע אותו לפי עמודת זכות/חובה (זכות=חיובי, חובה=שלילי) ולפי כיוון היתרה המצטברת — אם היתרה עלתה זו הכנסה (חיובי), אם ירדה זו הוצאה (שלילי). תיאורים כמו "העברה דיגיטל"/"העברה" יכולים להיות גם הכנסה וגם הוצאה — אל תניח, הכרע לפי העמודה והיתרה`;
+8. סימן הסכום קריטי: קבע אותו לפי עמודת זכות/חובה (זכות=חיובי, חובה=שלילי) ולפי כיוון היתרה המצטברת — אם היתרה עלתה זו הכנסה (חיובי), אם ירדה זו הוצאה (שלילי). תיאורים כמו "העברה דיגיטל"/"העברה" יכולים להיות גם הכנסה וגם הוצאה — אל תניח, הכרע לפי העמודה והיתרה
+9. ⚠️ עסקות מט"ח / חו"ל במטבע זר (קריטי — מקור לטעויות):
+   בטבלת "עסקות בחו\"ל / במטבע זר" כל **שורה אחת** היא **עסקה אחת בלבד**, גם אם השורה צפופה ומכילה הרבה מספרים בעמודות שונות. סדר העמודות בשורה כזו (מימין לשמאל): תאריך עסקה | שם בית העסק | סכום העסקה במטבע המקור (למשל 49.00 $) | סכום ההמרה | שער | תאריך המרה | עמלת מט"ח | **סכום חיוב**.
+   • **אסור לפצל שורת מט"ח אחת לכמה תנועות.** אם אתה רואה את אותו שם בית עסק עם אותו תאריך — זו עסקה אחת, לא שתיים ולא שלוש.
+   • הסכום שתשים ב-amount של התנועה = **סכום החיוב הסופי בש"ח (העמודה הכי שמאלית)**, ועליו **תוסיף את עמלת המט"ח** מאותה שורה. כלומר amount = -(סכום חיוב + עמלת מט"ח). דוגמה: שורה עם סכום חיוב 159.73₪ ועמלת מט"ח 4.65₪ ← תנועה אחת של amount = -164.38, desc = שם בית העסק. **אל תיצור שורה נפרדת לעמלה.**
+   • **אל תחשב בעצמך** את הש"ח מתוך מטבע המקור (אל תכפיל 49×שער). קח תמיד את "סכום החיוב" הכתוב בעמודה. אם בטעות חישבת — תקבל סכום שגוי.
+   • שורות "הערה: זיכוי על תנאי" / "זיכוי ריבית בגין ימי ערך" שמתחת לשורת עסקה הן **הערות לאותה עסקה**, לא עסקאות נפרדות — אל תיצור מהן תנועות.
+   • חיובי "עסקת חו\"ל בש\"ח" (כמו Google YouTube עם הערה "חיוב עסקת חו\"ל בש\"ח") הם עסקה רגילה אחת בש"ח — שורה אחת, amount שלילי, בלי כפילות.
+10. ⚠️ עסקות תשלומים / "סוג עסקה = תשלומים" (קריטי — מקור לכפילות):
+   בטבלת "עסקות בארץ / בש"ח" שורת תשלומים מכילה **שתי עמודות סכום**: "סכום העסקה" (הסכום הכולל של כל העסקה, למשל 6,200) ו"סכום החיוב" (הסכום שנגבה **החודש בלבד**, למשל 620), בתוספת הערה "תשלום X מתוך Y".
+   • **כל שורת תשלומים = תנועה אחת בלבד.** אסור לייצר שתיים/שלוש גרסאות של אותה עסקה.
+   • הסכום ב-amount = **סכום החיוב החודשי (העמודה הקטנה, 620)**, לא הסכום הכולל. amount שלילי. הסיבה: רק החיוב החודשי יורד מחשבון הבנק בפועל, וכך מתאימים לבנק.
+   • desc = שם בית העסק בלבד (למשל "רהיטי הסיטי - חיפה"). אפשר להוסיף בסוף את מספר התשלום בסוגריים, למשל "רהיטי הסיטי - חיפה (תשלום 10 מתוך 10)". **אל תכתוב את הסכום הכולל בתוך ה-desc** ואל תיצור שורה נפרדת ל"סה\"כ עסקה".
+   • שורות "דמי כרטיס" / "פטור והנחה מדמי כרטיס" עם זוג חיוב+החזר (5.77 ו-5.77- וכו') הן תנועות אמיתיות נפרדות — שמור עליהן עם הסימן הנכון (החזר=חיובי, חיוב=שלילי), אבל בלי כפילות.`;
 
   const data = await callAnthropicProxy({
     model: 'claude-sonnet-4-6',
@@ -2957,7 +3132,7 @@ async function confirmUpload(fileId){
   if(pf.file){
     origFileKeys.add(pf.fileId);
     idbSaveFile(pf.fileId, pf.file.name, pf.file.type, pf.file)
-      .then(()=>{ if(document.getElementById('screen-settings')?.classList.contains('active'))renderUploadedFiles(); })
+      .then(()=>{ if(settingsScreenActive())renderUploadedFiles(); })
       .catch(()=>{ origFileKeys.delete(pf.fileId); });
   }
 
@@ -3793,7 +3968,7 @@ function saveCatRename(){
   if(document.getElementById('txedit-modal')?.classList.contains('open') && txEditId) renderTxEditBody();
   if(document.getElementById('screen-reports')?.classList.contains('active')) renderReports();
   if(document.getElementById('screen-reconcile')?.classList.contains('active')) renderReconcile();
-  if(document.getElementById('screen-settings')?.classList.contains('active')) renderSettings();
+  refreshActiveSettings();
   showToast('✅ השם עודכן');
 }
 // stopPropagation wrapper for the inline pencil on grid chips (so tapping ✏️ renames, not assigns)
@@ -3803,19 +3978,23 @@ function editCatFromChip(ev,id,isInc){ ev.stopPropagation(); openCatRename(id,is
 function renderCategoriesManager(){
   const host=document.getElementById('settings-categories');
   if(!host)return;
-  const expEntries=Object.entries(allCatMeta()).filter(([id])=>!['salary','transfer'].includes(id)&&!id.startsWith('inc_'));
-  const incEntries=Object.entries(incomeCatMeta());
+  const q=(document.getElementById('cat-search')?.value||'').trim().toLowerCase();
+  const match=m=>!q || (m.name||'').toLowerCase().includes(q);
+  const expEntries=Object.entries(allCatMeta()).filter(([id])=>!['salary','transfer'].includes(id)&&!id.startsWith('inc_')).filter(([id,m])=>match(m));
+  const incEntries=Object.entries(incomeCatMeta()).filter(([id,m])=>match(m));
   const row=(id,m,isInc)=>`<div class="cat-mgr-row">
       <span class="cat-mgr-icon">${m.icon}</span>
       <span class="cat-mgr-name">${escHtml(m.name)}</span>
       ${isCustomCat(id)?'<span class="cat-mgr-tag">מותאם</span>':''}
       <span class="cat-mgr-edit" onclick="openCatRename('${id}',${isInc})">✏️ שנה שם</span>
     </div>`;
+  const expHtml = expEntries.length ? expEntries.map(([id,m])=>row(id,m,false)).join('') : '<div class="empty-state" style="padding:8px;font-size:12px;">אין תוצאות</div>';
+  const incHtml = incEntries.length ? incEntries.map(([id,m])=>row(id,m,true)).join('') : '<div class="empty-state" style="padding:8px;font-size:12px;">אין תוצאות</div>';
   host.innerHTML=`
     <div class="cat-mgr-sublabel">📉 הוצאות</div>
-    ${expEntries.map(([id,m])=>row(id,m,false)).join('')}
+    ${expHtml}
     <div class="cat-mgr-sublabel">📈 הכנסות</div>
-    ${incEntries.map(([id,m])=>row(id,m,true)).join('')}`;
+    ${incHtml}`;
 }
 
 // Create a new category (expense) or income type that isn't in the list, then assign it
@@ -4660,12 +4839,13 @@ function promptNewCategory(encName){
 // ═══════════════════════════
 function renderSettings(){
   const remLabels={weekly:'שבועי',biweekly:'פעמיים בחודש',monthly:'חודשי',manual:'ידני'};
-  document.getElementById('settings-reminder-val').textContent=remLabels[state.reminder]||'—';
+  const _rv=document.getElementById('settings-reminder-val'); if(_rv) _rv.textContent=remLabels[state.reminder]||'—';
   const d=new Date(state.startDate+'-01');
-  document.getElementById('settings-start-date-val').textContent=d.toLocaleDateString('he-IL',{year:'numeric',month:'long'});
+  const _sd=document.getElementById('settings-start-date-val'); if(_sd) _sd.textContent=d.toLocaleDateString('he-IL',{year:'numeric',month:'long'});
 
   const banksDiv=document.getElementById('settings-banks');
-  if(state.selectedBanks.size===0){banksDiv.innerHTML='<div class="empty-state" style="padding:12px">לא הוגדרו</div>';}
+  if(!banksDiv){ /* not on banks sub-screen */ }
+  else if(state.selectedBanks.size===0){banksDiv.innerHTML='<div class="empty-state" style="padding:12px">לא הוגדרו</div>';}
   else{banksDiv.innerHTML=[...state.selectedBanks].map(id=>{
     const b=bankDef(id);
     const insts=state.bankInstances[id]||[];
@@ -4696,7 +4876,8 @@ function renderSettings(){
   }).join('');}
 
   const cardsDiv=document.getElementById('settings-cards');
-  if(state.selectedCards.size===0){cardsDiv.innerHTML='<div class="empty-state" style="padding:12px">לא הוגדרו</div>';}
+  if(!cardsDiv){ /* not on cards sub-screen */ }
+  else if(state.selectedCards.size===0){cardsDiv.innerHTML='<div class="empty-state" style="padding:12px">לא הוגדרו</div>';}
   else{
     const bankAccounts=getAllAccounts().filter(a=>a.type==='bank');
     cardsDiv.innerHTML=[...state.selectedCards].map(id=>{
@@ -4788,7 +4969,7 @@ function _afterAccStartChange(){
   const wasUpload=accStartFromUpload;
   closeAccStart();
   if(!wasUpload){
-    if(document.getElementById('screen-settings')?.classList.contains('active')) renderSettings();
+    refreshActiveSettings();
     if(document.getElementById('screen-dashboard')?.classList.contains('active')) renderDashboard();
   }
 }
@@ -4839,7 +5020,7 @@ function closeAccEnd(){ document.getElementById('acc-end-modal').classList.remov
 function _afterAccEndChange(){
   saveState(); if(typeof currentUser!=='undefined' && currentUser) saveToCloud();
   closeAccEnd();
-  if(document.getElementById('screen-settings')?.classList.contains('active')) renderSettings();
+  refreshActiveSettings();
   if(document.getElementById('screen-dashboard')?.classList.contains('active')) renderDashboard();
 }
 function saveAccEnd(){
@@ -4876,7 +5057,7 @@ function createCustomInstitution(type,name,icon,digits){
 }
 
 function openCustomInstModal(type,origin){
-  customInstType=type; customInstOrigin=origin||(document.getElementById('screen-settings')?.classList.contains('active')?'settings':'onboarding');
+  customInstType=type; customInstOrigin=origin||(settingsScreenActive()?'settings':'onboarding');
   customInstIcon=(type==='bank')?BANK_ICONS[0]:CARD_ICONS[0];
   document.getElementById('custom-inst-title').textContent=(type==='bank')?'➕ בנק אחר':'➕ כרטיס אחר';
   document.getElementById('custom-inst-name').value='';
@@ -4905,7 +5086,8 @@ function saveCustomInst(){
     if(customInstType==='bank'){ buildBanksGrid(); } else { buildCardsGrid(); }
   } else {
     saveState(); if(typeof currentUser!=='undefined' && currentUser) saveToCloud();
-    renderSettings();
+    // jump to the relevant sub-screen so the user sees the new account
+    openSettingsSub(customInstType==='bank'?'banks':'cards');
   }
   showToast('✅ נוסף: '+name);
 }
@@ -4940,7 +5122,7 @@ function saveAddAccount(){
   store[id]=store[id]||[]; store[id].push({id:Date.now(),digits});
   closeAddAccountModal();
   saveState(); if(typeof currentUser!=='undefined' && currentUser) saveToCloud();
-  renderSettings();
+  openSettingsSub(type==='bank'?'banks':'cards');
   showToast('✅ נוסף');
 }
 
@@ -5319,7 +5501,7 @@ function startAuthFlow(){
       try{ loadState(); loadTx(); }catch(e){ console.error('local load failed', e); }
       await loadFromCloud(user.uid).catch(()=>{});
       if(!cloudLoaded){ setSyncStatus('error'); }
-      refreshOrigFileKeys().then(()=>{ if(document.getElementById('screen-settings')?.classList.contains('active'))renderUploadedFiles(); });
+      refreshOrigFileKeys().then(()=>{ if(settingsScreenActive())renderUploadedFiles(); });
       if(state.setupDone){ exitAuthTo(showDashboard); }
       else { exitAuthTo(()=>{ initOnboarding(); showScreen('screen-onboarding'); }); }
     } else {
