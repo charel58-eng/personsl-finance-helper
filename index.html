@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.37";
+const APP_VERSION = "2.39";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -1646,7 +1646,9 @@ function resolveChargeAsExpense(bankTxId){
   cardChargeUnmatched=cardChargeUnmatched.filter(id=>id!==bankTxId);
   delete cardChargeManual[bankTxId];
   detectCardChargeMatches(); saveTx(); rerenderCardScreens();
-  showToast(`✓ סומן כ${word} — נספר ונסגר`);
+  showToast(`✓ סומן כ${word} — בחר קטגוריה`);
+  // Take the user straight to deciding which expense/income this is (category list open)
+  openTxEdit(bankTxId, true);
 }
 function resolveSettlement(sid){
   if(!cardSettlementResolved.includes(sid)) cardSettlementResolved.push(sid);
@@ -3560,9 +3562,9 @@ function renderReconcile(){
 
 // ── edit modal ──
 // Entry point: opens the modal fresh (category list collapsed by default, like the supplier row).
-function openTxEdit(id){
+function openTxEdit(id, openCat){
   txEditId=id;
-  txCatEditOpen=false;
+  txCatEditOpen=!!openCat;
   if(!transactions.find(x=>x.id===id))return;
   renderTxEditBody();
   document.getElementById('txedit-modal').classList.add('open');
@@ -4474,12 +4476,12 @@ function renderCardResolve(){
       const checked=p.bankTxId===t.id;
       const miss=!_cardDetailPresent(t);
       const sub=fmtD(t.date)+(t.desc?' · '+escHtml(''+t.desc):'')+(miss?' · חסר פירוט':'');
-      return `<div style="flex:1;min-width:0;">
-        <label style="display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid ${checked?'var(--green)':'var(--border2)'};border-radius:9px;padding:6px 8px;cursor:pointer;">
+      return `<div style="flex:1;min-width:0;position:relative;">
+        <button onclick="resolveChargeAsExpense('${t.id}')" style="position:absolute;top:3px;left:6px;z-index:2;background:none;border:none;color:var(--text3);font-family:'Heebo';font-size:9px;cursor:pointer;text-decoration:underline;padding:0;">לא חיוב אשראי</button>
+        <label style="display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid ${checked?'var(--green)':'var(--border2)'};border-radius:9px;padding:14px 8px 6px;cursor:pointer;">
           <input type="checkbox" ${checked?'checked':''} onclick="cmToggle('bank','${bankKey}','${t.id}')" style="width:16px;height:16px;flex:none;">
           <span style="min-width:0;">${filledCell(fmtAmount(t.amount),sub)}</span>
         </label>
-        <div style="text-align:right;margin-top:1px;"><button onclick="resolveChargeAsExpense('${t.id}')" style="background:none;border:none;color:var(--text3);font-family:'Heebo';font-size:10px;cursor:pointer;text-decoration:underline;">לא חיוב אשראי</button></div>
       </div>`;
     };
     const visaCol=(s)=>{
@@ -4487,12 +4489,12 @@ function renderCardResolve(){
       const checked=p.sid===s.sid;
       const miss=!_bankStatementPresent(s);
       const sub=escHtml(acN(s.cardKey))+' · '+fmtD(s.date)+(miss?' · חסר דף בנק':'');
-      return `<div style="flex:1;min-width:0;">
-        <label style="display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid ${checked?'var(--green)':'var(--border2)'};border-radius:9px;padding:6px 8px;cursor:pointer;">
+      return `<div style="flex:1;min-width:0;position:relative;">
+        <button onclick="resolveSettlement('${s.sid}')" style="position:absolute;top:3px;left:6px;z-index:2;background:none;border:none;color:var(--text3);font-family:'Heebo';font-size:9px;cursor:pointer;text-decoration:underline;padding:0;">סמן כטופל</button>
+        <label style="display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid ${checked?'var(--green)':'var(--border2)'};border-radius:9px;padding:14px 8px 6px;cursor:pointer;">
           <input type="checkbox" ${checked?'checked':''} onclick="cmToggle('visa','${bankKey}','${s.sid}','${s.cardKey}')" style="width:16px;height:16px;flex:none;">
           <span style="min-width:0;">${filledCell(fmtAmount(-s.amount),sub)}</span>
         </label>
-        <div style="text-align:left;margin-top:1px;"><button onclick="resolveSettlement('${s.sid}')" style="background:none;border:none;color:var(--text3);font-family:'Heebo';font-size:10px;cursor:pointer;text-decoration:underline;">סמן כטופל</button></div>
       </div>`;
     };
     const rowsN=Math.max(bSorted.length,sSorted.length);
