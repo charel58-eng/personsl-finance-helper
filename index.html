@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.45";
+const APP_VERSION = "2.48";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -905,7 +905,7 @@ button{cursor:pointer;}
   <div class="db-topbar">
     <div class="db-greeting">שלום, <span>עוקב! 👋</span></div>
     <div style="display:flex;gap:8px;">
-      <div class="icon-btn" onclick="showUpload()">📤</div>
+      <div class="icon-btn" onclick="showUpload()" style="position:relative;">📤<span id="upload-icon-badge" style="display:none;position:absolute;top:-5px;right:-5px;min-width:17px;height:17px;padding:0 4px;background:var(--purple,#b84aff);color:#fff;border-radius:9px;font-size:10px;font-weight:800;align-items:center;justify-content:center;line-height:1;box-sizing:border-box;border:1.5px solid var(--bg,#090a12);">0</span></div>
       <div class="icon-btn" onclick="showSettings()">⚙️</div>
     </div>
   </div>
@@ -918,6 +918,16 @@ button{cursor:pointer;}
       <span class="alert-count" id="alert-count">0</span>
     </div>
     <div class="alert-items" id="alert-items"></div>
+  </div>
+
+  <!-- Pending unconfirmed uploads — persistent + tappable (stays until the upload is confirmed/removed) -->
+  <div id="pending-upload-banner" style="display:none;margin:0 0 12px;padding:12px 14px;background:var(--purple-dim);border:1px solid rgba(184,74,255,0.35);border-radius:12px;cursor:pointer;align-items:center;gap:10px;" onclick="showUpload()">
+    <span style="font-size:18px;">📤</span>
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:13px;font-weight:700;color:var(--purple);">העלאה ממתינה לאישור</div>
+      <div id="pending-upload-sub" style="font-size:11px;color:var(--text2);">לחץ כדי לסיים את הקליטה</div>
+    </div>
+    <span style="font-size:16px;color:var(--text2);">‹</span>
   </div>
 
   <div class="db-month">
@@ -1932,6 +1942,7 @@ async function restorePendingUploads(){
       restored++;
     }
     if(restored>0) showToast(`📤 ${restored} העלאה לא-מאושרת ממתינה — היכנס למסך ההעלאה כדי לסיים`);
+    if(typeof renderPendingBanner==='function') renderPendingBanner();
   }catch(e){ console.error('restorePendingUploads failed', e); }
 }
 // Re-render the current pending queue into the upload screen (on screen open AND after restore).
@@ -2440,7 +2451,20 @@ function refreshActiveSettings(){
 // ═══════════════════════════
 //  DASHBOARD RENDER
 // ═══════════════════════════
+// Persistent indicator for unconfirmed uploads waiting to be approved (replaces the fleeting toast).
+function renderPendingBanner(){
+  const n=(typeof pendingFiles!=='undefined'?pendingFiles.length:0);
+  const b=document.getElementById('pending-upload-banner');
+  if(!b) return;
+  b.style.display = n>0 ? 'flex' : 'none';
+  const sub=document.getElementById('pending-upload-sub');
+  if(sub) sub.textContent = (n===1?'קובץ אחד ממתין':`${n} קבצים ממתינים`)+' — לחץ כדי לסיים את הקליטה';
+  const badge=document.getElementById('upload-icon-badge');
+  if(badge){ badge.style.display = n>0 ? 'flex' : 'none'; badge.textContent = n>9?'9+':String(n); }
+}
+
 function renderDashboard(){
+  renderPendingBanner();
   // Month label
   document.getElementById('db-month-label').textContent=MONTHS_FULL[currentMonth.getMonth()]+' '+currentMonth.getFullYear();
 
@@ -2719,6 +2743,7 @@ function removePendingFile(fileId){
   pendingDelete(fileId);
   pendingFiles=pendingFiles.filter(f=>f.fileId!==fileId);
   document.getElementById('fitem_'+fileId)?.remove();
+  if(typeof renderPendingBanner==='function') renderPendingBanner();
 }
 
 function fileToBase64(file){
@@ -2853,9 +2878,25 @@ async function analyzeFile(pf, ext){
     if(e.code==='TOO_LONG'){ showFileTooLong(assignDiv, pf, 'התברר שהקובץ מכיל יותר מדי תנועות לניתוח בבת אחת'); return; }
     console.error('AI analysis failed:', e);
     pf._status='error'; pendingSave(pf);
+    // Surface the REAL underlying error (code+message+details) so failures are diagnosable on-device,
+    // instead of only the friendly "transient" wording (which hides function timeouts, quota, 5xx, etc.).
+    let _tech='';
+    try{
+      const parts=[];
+      if(e&&e.code) parts.push('code: '+e.code);
+      if(e&&e.message) parts.push('msg: '+e.message);
+      if(e&&e.details!=null) parts.push('details: '+(typeof e.details==='string'?e.details:JSON.stringify(e.details)));
+      _tech=parts.join('\n');
+    }catch(_){ _tech=String((e&&e.message)||e||''); }
+    const _techEsc=escHtml(_tech||'—');
     // Analysis fully failed → no transactions parsed. Offer a real retry (manual account selection can't recover the data).
     assignDiv.innerHTML=`<div class="assign-ambiguous">⚠️ ${friendlyAiError(e.message)}</div>
-      <button class="btn-confirm-upload" onclick="retryAnalyze('${pf.fileId}')">🔄 נסה לנתח שוב</button>
+      <details style="margin-top:8px;background:var(--surface3);border:1px solid var(--border2);border-radius:8px;padding:8px;">
+        <summary style="font-size:11px;color:var(--text2);cursor:pointer;">🔧 פרטים טכניים (לאבחון)</summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-size:10px;color:var(--text2);margin:8px 0 0;direction:ltr;text-align:left;">${_techEsc}</pre>
+        <button class="btn-confirm-upload" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border2);margin-top:6px;font-size:11px;padding:6px;" onclick="if(navigator.clipboard){navigator.clipboard.writeText(this.parentElement.querySelector('pre').textContent).then(()=>showToast('📋 הועתק'))}">📋 העתק פרטים</button>
+      </details>
+      <button class="btn-confirm-upload" onclick="retryAnalyze('${pf.fileId}')" style="margin-top:8px;">🔄 נסה לנתח שוב</button>
       <button class="btn-confirm-upload" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border2);margin-top:6px;" onclick="removePendingFile('${pf.fileId}')">הסר קובץ</button>`;
   }
 }
@@ -3307,6 +3348,7 @@ async function confirmUpload(fileId){
   pendingDelete(fileId);
   pendingFiles=pendingFiles.filter(f=>f.fileId!==fileId);
   document.getElementById('fitem_'+fileId)?.remove();
+  if(typeof renderPendingBanner==='function') renderPendingBanner();
   const mCount=covered.length;
   const baseMsg = skipped>0
     ? `✅ נקלטו ${toAdd.length} פעולות חדשות · ${skipped} כפילויות דולגו`
