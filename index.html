@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.44";
+const APP_VERSION = "2.45";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -1867,6 +1867,93 @@ function refreshOrigFileKeys(){
     r.onerror=()=>res(origFileKeys);
   })).catch(()=>origFileKeys);
 }
+// ── Pending (unconfirmed) uploads: survive navigation AND a full reload / PWA-close ──
+// Stored in a SEPARATE IndexedDB database so they never mix with confirmed originals (origFiles).
+// Each record = the file blob + its analysis state, keyed by fileId. Cleared on confirm / remove / logout.
+const PENDDB_NAME='fpPending', PENDDB_STORE='pending';
+const PENDING_MAX_AGE_MS=7*24*60*60*1000; // purge unconfirmed uploads older than 7 days on load
+function _pidbOpen(){
+  return new Promise((res,rej)=>{
+    let req; try{ req=indexedDB.open(PENDDB_NAME,1); }catch(e){ return rej(e); }
+    req.onupgradeneeded=()=>{ const db=req.result; if(!db.objectStoreNames.contains(PENDDB_STORE)) db.createObjectStore(PENDDB_STORE,{keyPath:'fileId'}); };
+    req.onsuccess=()=>res(req.result);
+    req.onerror=()=>rej(req.error);
+  });
+}
+function pendingSave(pf){
+  if(!pf||!pf.fileId||!pf.file) return Promise.resolve(false);
+  const rec={
+    fileId:pf.fileId, name:pf.file.name, type:pf.file.type||'',
+    ext:pf.ext||(pf.file.name||'').split('.').pop().toLowerCase(),
+    blob:pf.file, assignedKey:pf.assignedKey||null, preselectedKey:pf.preselectedKey||null,
+    aiResult:pf.aiResult||null, status:pf._status||'analyzing', ts:pf._ts||Date.now()
+  };
+  return _pidbOpen().then(db=>new Promise((res)=>{
+    const tx=db.transaction(PENDDB_STORE,'readwrite');
+    tx.objectStore(PENDDB_STORE).put(rec);
+    tx.oncomplete=()=>res(true); tx.onerror=()=>res(false);
+  })).catch(()=>false);
+}
+function pendingDelete(fileId){
+  return _pidbOpen().then(db=>new Promise((res)=>{
+    const tx=db.transaction(PENDDB_STORE,'readwrite');
+    tx.objectStore(PENDDB_STORE).delete(fileId);
+    tx.oncomplete=()=>res(true); tx.onerror=()=>res(false);
+  })).catch(()=>false);
+}
+function pendingClear(){
+  return _pidbOpen().then(db=>new Promise((res)=>{
+    const tx=db.transaction(PENDDB_STORE,'readwrite');
+    tx.objectStore(PENDDB_STORE).clear();
+    tx.oncomplete=()=>res(true); tx.onerror=()=>res(false);
+  })).catch(()=>false);
+}
+function pendingGetAll(){
+  return _pidbOpen().then(db=>new Promise((res)=>{
+    const r=db.transaction(PENDDB_STORE,'readonly').objectStore(PENDDB_STORE).getAll();
+    r.onsuccess=()=>res(r.result||[]); r.onerror=()=>res([]);
+  })).catch(()=>[]);
+}
+// On app load: rebuild the pending queue from IDB so unconfirmed uploads survive a reload / PWA-close.
+async function restorePendingUploads(){
+  try{
+    const recs=await pendingGetAll();
+    const now=Date.now(); let restored=0;
+    for(const r of recs){
+      if(!r||!r.fileId) continue;
+      if(!r.blob || (r.ts && (now-r.ts)>PENDING_MAX_AGE_MS)){ pendingDelete(r.fileId); continue; }
+      if(pendingFiles.some(p=>p.fileId===r.fileId)) continue;
+      const file=new File([r.blob], r.name||'file', {type:r.type||''});
+      pendingFiles.push({
+        file, fileId:r.fileId, ext:r.ext||(r.name||'').split('.').pop().toLowerCase(),
+        detectedAccount:null, assignedKey:r.assignedKey||null, preselectedKey:r.preselectedKey||null,
+        aiResult:r.aiResult||null, _status:r.status||'done', _ts:r.ts||now
+      });
+      restored++;
+    }
+    if(restored>0) showToast(`📤 ${restored} העלאה לא-מאושרת ממתינה — היכנס למסך ההעלאה כדי לסיים`);
+  }catch(e){ console.error('restorePendingUploads failed', e); }
+}
+// Re-render the current pending queue into the upload screen (on screen open AND after restore).
+// Uses the cached aiResult when present (no extra AI call); only re-analyzes files that never finished.
+function renderPendingQueue(){
+  const q=document.getElementById('file-queue'); if(!q) return;
+  pendingFiles.forEach(pf=>{
+    const ext=pf.ext||((pf.file&&pf.file.name)||'').split('.').pop().toLowerCase();
+    if(!document.getElementById('fitem_'+pf.fileId)) renderFileItem(pf, ext);
+    const assignDiv=document.getElementById('assign_'+pf.fileId);
+    if(pf.aiResult && assignDiv){
+      renderAssignUI(pf, pf.aiResult, getAllAccounts(), assignDiv);
+      if(pf.assignedKey){
+        const btn=document.getElementById('confirm_'+pf.fileId); if(btn) btn.disabled=false;
+        const opt=assignDiv.querySelector('.assign-opt[data-key="'+pf.assignedKey+'"]');
+        if(opt){ const acc=getAllAccounts().find(a=>a.key===pf.assignedKey); opt.className='assign-opt '+(acc&&acc.type==='bank'?'selected-bank':'selected-card'); }
+      }
+    } else if(!pf.aiResult){
+      analyzeFile(pf, ext); // never finished (mid-analysis / errored at reload) — blob is still here
+    }
+  });
+}
 // Open the stored original file. PDF → new tab (opened synchronously to survive popup blockers); others → download.
 function viewOriginalFile(fileId){
   const f=uploadedFiles.find(x=>x.fileId===fileId);
@@ -2574,7 +2661,6 @@ function showUploadForAccount(key){
 }
 
 function renderUploadScreen(){
-  pendingFiles=[];
   document.getElementById('file-queue').innerHTML='';
   document.getElementById('ai-processing').classList.remove('visible');
   document.getElementById('analysis-result').classList.remove('visible');
@@ -2590,6 +2676,7 @@ function renderUploadScreen(){
   dz.ondragover=e=>{e.preventDefault();dz.classList.add('drag-over');};
   dz.ondragleave=()=>dz.classList.remove('drag-over');
   dz.ondrop=e=>{e.preventDefault();dz.classList.remove('drag-over');handleFiles(e.dataTransfer.files);};
+  renderPendingQueue();
 }
 
 function handleFiles(files){
@@ -2599,8 +2686,9 @@ function handleFiles(files){
     const ext=file.name.split('.').pop().toLowerCase();
     if(!['pdf','xlsx','xls','csv'].includes(ext)){showToast('❌ פורמט לא נתמך: '+ext,'error');return;}
     const fileId='f_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
-    const pf={file, fileId, detectedAccount:null, assignedKey:null, preselectedKey:preselectedKey||null};
+    const pf={file, fileId, ext, detectedAccount:null, assignedKey:null, preselectedKey:preselectedKey||null, _status:'analyzing', _ts:Date.now()};
     pendingFiles.push(pf);
+    pendingSave(pf);
     renderFileItem(pf, ext);
     analyzeFile(pf, ext);
   });
@@ -2628,6 +2716,7 @@ function renderFileItem(pf, ext){
 }
 
 function removePendingFile(fileId){
+  pendingDelete(fileId);
   pendingFiles=pendingFiles.filter(f=>f.fileId!==fileId);
   document.getElementById('fitem_'+fileId)?.remove();
 }
@@ -2763,6 +2852,7 @@ async function analyzeFile(pf, ext){
   } catch(e) {
     if(e.code==='TOO_LONG'){ showFileTooLong(assignDiv, pf, 'התברר שהקובץ מכיל יותר מדי תנועות לניתוח בבת אחת'); return; }
     console.error('AI analysis failed:', e);
+    pf._status='error'; pendingSave(pf);
     // Analysis fully failed → no transactions parsed. Offer a real retry (manual account selection can't recover the data).
     assignDiv.innerHTML=`<div class="assign-ambiguous">⚠️ ${friendlyAiError(e.message)}</div>
       <button class="btn-confirm-upload" onclick="retryAnalyze('${pf.fileId}')">🔄 נסה לנתח שוב</button>
@@ -2979,6 +3069,7 @@ function renderAssignUI(pf, result, allAccounts, assignDiv){
         <button class="btn-confirm-upload" id="confirm_${pf.fileId}" onclick="confirmUpload('${pf.fileId}')" disabled style="flex:1">✅ אשר ושמור</button>
       </div>`;
   }
+  pf._status='done'; pendingSave(pf);
 }
 
 function renderAISummary(result){
@@ -3031,6 +3122,7 @@ function assignFile(fileId, accountKey, el){
   el.className='assign-opt '+(acc?.type==='bank'?'selected-bank':'selected-card');
   const btn=document.getElementById('confirm_'+fileId);
   if(btn)btn.disabled=false;
+  pendingSave(pf);
 }
 
 // ═══════════════════════════
@@ -3212,6 +3304,7 @@ async function confirmUpload(fileId){
   saveTx();
   const found=discoverCategories();
 
+  pendingDelete(fileId);
   pendingFiles=pendingFiles.filter(f=>f.fileId!==fileId);
   document.getElementById('fitem_'+fileId)?.remove();
   const mCount=covered.length;
@@ -5299,7 +5392,7 @@ function resetSetup(){
   try{localStorage.removeItem(STORAGE_KEY);localStorage.removeItem(TRANSACTIONS_KEY);}catch(e){}
   state={currentStep:0,selectedBanks:new Set(),bankInstances:{},selectedCards:new Set(),cardInstances:{},startDate:'2026-01',reminder:'biweekly',setupDone:false,cardBankLinks:{},verifiedMonths:{},accountStarts:{},accountEnds:{},customBanks:{},customCards:{}};
   transactions=[];uploadedFiles=[];pendingFiles=[];customCategories={};merchantOverrides={};supplierOverrides={};incomeOverrides={};customIncomeCats={};notesArchive=[];
-  cardChargeMatches=[];cardChargeUnmatched=[];cardChargeManual={};cardChargeResolved=[];cardSettlementResolved=[];unmatchedSettlements=[];origFileKeys=new Set();idbClearAll();
+  cardChargeMatches=[];cardChargeUnmatched=[];cardChargeManual={};cardChargeResolved=[];cardSettlementResolved=[];unmatchedSettlements=[];origFileKeys=new Set();idbClearAll();pendingClear();
   initOnboarding();showScreen('screen-onboarding');
 }
 
@@ -5561,6 +5654,7 @@ function startAuthFlow(){
       await loadFromCloud(user.uid).catch(()=>{});
       if(!cloudLoaded){ setSyncStatus('error'); }
       refreshOrigFileKeys().then(()=>{ if(settingsScreenActive())renderUploadedFiles(); });
+      restorePendingUploads();
       if(state.setupDone){ exitAuthTo(showDashboard); }
       else { exitAuthTo(()=>{ initOnboarding(); showScreen('screen-onboarding'); }); }
     } else {
