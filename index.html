@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.43";
+const APP_VERSION = "2.44";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -542,7 +542,7 @@ button{cursor:pointer;}
 .toast.info{border-color:var(--blue-glow);color:var(--blue);}
 
 /* ── AI CHAT ── */
-#screen-chat{padding-bottom:0;}
+#screen-chat{height:100dvh;max-height:100dvh;box-sizing:border-box;overflow:hidden;padding-bottom:calc(72px + env(safe-area-inset-bottom));}
 .chat-header{padding:18px 20px 12px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);}
 .chat-ai-avatar{width:40px;height:40px;background:var(--purple-dim);border:1.5px solid rgba(184,74,255,0.3);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
 .chat-title{font-size:16px;font-weight:800;}
@@ -558,7 +558,7 @@ button{cursor:pointer;}
 .chat-suggestions{display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px;}
 .chat-sug{padding:6px 12px;background:var(--surface2);border:1px solid var(--border2);border-radius:20px;font-size:12px;color:var(--text2);cursor:pointer;transition:all .15s;}
 .chat-sug:active{background:var(--purple-dim);border-color:rgba(184,74,255,0.4);color:var(--purple);}
-.chat-input-row{padding:10px 16px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:flex-end;border-top:1px solid var(--border);}
+.chat-input-row{padding:10px 16px;display:flex;gap:8px;align-items:flex-end;border-top:1px solid var(--border);}
 .chat-input{flex:1;background:var(--surface2);border:1.5px solid var(--border2);border-radius:12px;padding:10px 14px;font-size:14px;color:var(--text);resize:none;min-height:42px;max-height:120px;overflow-y:auto;}
 .chat-input:focus{border-color:var(--purple);}
 .chat-send{width:40px;height:40px;background:var(--purple-dim);border:1.5px solid rgba(184,74,255,0.4);border-radius:12px;font-size:18px;color:var(--purple);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;transition:all .15s;}
