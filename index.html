@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.53";
+const APP_VERSION = "2.54";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -2317,7 +2317,7 @@ function renderDupCleanup(fresh){
         <div style="font-size:18px;flex-shrink:0;">${ico}</div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;${txtCol}">${escHtml(i.desc||'פעולה')}</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:3px;"><span style="color:${amtCol};font-weight:700;">${amtTxt}</span> · 📅 ${escHtml(dHe)} · 📄 ${escHtml(i.source||'מקור לא ידוע')}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:4px;line-height:1.6;"><span style="color:${amtCol};font-weight:800;font-size:15px;">${amtTxt}</span> &nbsp;·&nbsp; <span style="font-size:13px;color:var(--text2);">📅 ${escHtml(dHe)}</span> &nbsp;·&nbsp; 📄 ${escHtml(i.source||'מקור לא ידוע')}</div>
         </div>${tail}
       </div>`;
     }).join('');
@@ -2325,7 +2325,7 @@ function renderDupCleanup(fresh){
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:10px;background:var(--surface3);">
         <div style="min-width:0;flex:1;">
           <div style="font-size:14px;font-weight:700;">${escHtml((g.items[0].desc||'פעולה').slice(0,34))}</div>
-          <div style="font-size:12px;color:var(--text2);margin-top:3px;line-height:1.6;"><span style="color:var(--red);font-weight:800;font-size:14px;">${amtTxt}</span> · 📅 ${escHtml(dHe)} · ${escHtml(accName(g.accountKey))} · ${g.items.length} עותקים</div>
+          <div style="font-size:13px;color:var(--text2);margin-top:4px;line-height:1.7;"><span style="color:var(--red);font-weight:800;font-size:18px;">${amtTxt}</span> &nbsp;·&nbsp; <span style="font-size:14px;">📅 ${escHtml(dHe)}</span> &nbsp;·&nbsp; ${escHtml(accName(g.accountKey))} &nbsp;·&nbsp; ${g.items.length} עותקים</div>
         </div>${tag}
       </div>${note}${rows}
     </div>`;
@@ -2341,7 +2341,10 @@ function renderDupCleanup(fresh){
     </div>
     ${certainCnt?`<button class="btn-confirm-upload" style="width:100%;background:var(--surface2);color:var(--text2);border:1px solid var(--border2);margin-bottom:12px;font-size:13px;" onclick="dupSelectAllCertain()">✔️ בחר את כל הכפילויות הוודאיות (${certainCnt})</button>`:''}
     ${dupGroups.map(groupHtml).join('')}
-    <button class="btn-confirm-upload" style="width:100%;background:var(--red-dim);color:var(--red);border:1px solid var(--red);font-weight:700;margin-top:4px;margin-bottom:16px;" onclick="dupRemoveSelected()">🗑️ מחק ${selCount} תנועות שנבחרו</button>`;
+    <div style="position:sticky;bottom:74px;z-index:6;margin:8px -4px 0;padding:8px 4px 6px;background:var(--bg);border-top:1px solid var(--border);">
+      <button class="btn-confirm-upload" style="width:100%;background:var(--red-dim);color:var(--red);border:1px solid var(--red);font-weight:700;font-size:15px;" onclick="dupRemoveSelected()">🗑️ מחק ${selCount} תנועות שנבחרו</button>
+    </div>
+    <div style="height:8px;"></div>`;
 }
 function dupToggle(id){
   const g=dupGroups.find(g=>g.items.some(i=>i.id===id)); if(!g) return;
