@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.54";
+const APP_VERSION = "2.58";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -1189,6 +1189,9 @@ button{cursor:pointer;}
   <div class="settings-section">
     <div id="settings-dups"></div>
   </div>
+  <div id="dup-delbar" style="display:none;position:fixed;right:0;left:0;max-width:480px;margin:0 auto;bottom:calc(64px + env(safe-area-inset-bottom));z-index:90;padding:8px 16px;background:rgba(9,10,18,0.97);backdrop-filter:blur(12px);border-top:1px solid var(--border);">
+    <button class="btn-confirm-upload" id="dup-delbtn" style="width:100%;background:var(--red-dim);color:var(--red);border:1px solid var(--red);font-weight:700;font-size:15px;" onclick="dupRemoveSelected()">🗑️ מחק</button>
+  </div>
   <div class="bottom-nav">
     <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
     <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
@@ -1501,6 +1504,7 @@ function loadTx(){
     cardChargeResolved=d.cardChargeResolved||[];
     cardSettlementResolved=d.cardSettlementResolved||[];
     migrateIncomeCategories();
+    backfillCardBillingMonths();
     reconcileSignsFromBalance();
     detectInternalTransfers();
     detectCardChargeMatches();
@@ -2210,16 +2214,55 @@ function toggleCardConflictAdv(fileId){
   if(lbl) lbl.textContent=open?'אפשרויות מתקדמות ▾':'אפשרויות מתקדמות ▴';
 }
 // Replace: delete every existing file on this card that overlaps the new file's months, then re-run the upload.
+// Billing month of a card statement = the month of its latest settlement/charge date. Uses the latest
+// chargeSummaries date when available (most reliable), else the latest transaction date (dateRange.to),
+// else the latest coveredMonth. Robust to installment rows that carry an old original-purchase date.
+function _cardBillingMonth(fileLike){
+  if(!fileLike) return '';
+  let best='';
+  (fileLike.chargeSummaries||[]).forEach(s=>{ if(s&&s.date){ const m=(''+s.date).slice(0,7); if(/^\d{4}-\d{2}$/.test(m) && m>best) best=m; } });
+  if(best) return best;
+  const dr=fileLike.dateRange||{};
+  if(dr.to){ const m=(''+dr.to).slice(0,7); if(/^\d{4}-\d{2}$/.test(m)) return m; }
+  const cm=(fileLike.coveredMonths||[]).filter(Boolean).slice().sort();
+  return cm.length? cm[cm.length-1] : '';
+}
+// Existing card files on this account whose billing month equals the new file's → a re-upload of the same month.
+function _cardBillingConflicts(accountKey, fileLike){
+  const bm=_cardBillingMonth(fileLike);
+  if(!bm) return [];
+  return uploadedFiles.filter(f=>f.accountKey===accountKey && _cardBillingMonth(f)===bm).map(f=>({file:f, shared:[bm]}));
+}
 function resolveCardConflictByReplace(pendingId){
   const pf=pendingFiles.find(f=>f.fileId===pendingId);
   if(!pf)return;
   const r=pf.aiResult||{};
-  const dr0=r.estimatedDateRange||{from:getCurrentYYYYMM(),to:getCurrentYYYYMM()};
-  const newMonths=(r.coveredMonths&&r.coveredMonths.length)?r.coveredMonths:getMonthsBetween(dr0.from,dr0.to);
-  const conflicts=findOverlapConflicts(pf.assignedKey,newMonths);
+  const conflicts=_cardBillingConflicts(pf.assignedKey, {chargeSummaries:r.chargeSummaries, dateRange:r.estimatedDateRange, coveredMonths:r.coveredMonths});
   conflicts.forEach(c=>deleteUploadedFile(c.file.fileId));
   if(conflicts.length) showToast('🗑️ '+conflicts.length+' דפים קיימים נמחקו — ממשיך בהעלאה');
   confirmUpload(pendingId);
+}
+
+// Effective reporting month of a transaction (v2.58). Credit-card charges are attributed to the
+// statement's BILLING month (stamped at ingest as t.billingMonth), so an installment row that carries an
+// old original-purchase date still counts in the month it was actually billed. Everything else (bank,
+// non-card) falls back to the transaction date.
+function txMonth(t){ return (t && t.billingMonth) ? t.billingMonth : ((t && t.date || '').slice(0,7)); }
+// Backfill billingMonth on card transactions ingested before it was stamped — maps each card tx to its
+// uploaded file's billing month (its single coveredMonths entry). Idempotent; safe on every load.
+function backfillCardBillingMonths(){
+  const cardKeys=new Set(getAllAccounts().filter(a=>a.type==='card').map(a=>a.key));
+  if(!cardKeys.size) return 0;
+  const bmById={};
+  (uploadedFiles||[]).forEach(f=>{
+    if(!cardKeys.has(f.accountKey)) return;
+    const bm=(f.coveredMonths&&f.coveredMonths.length===1)?f.coveredMonths[0]:_cardBillingMonth(f);
+    if(!bm) return;
+    txIdsOfFile(f.fileId).forEach(id=>{ bmById[id]=bm; });
+  });
+  let changed=0;
+  transactions.forEach(t=>{ if(cardKeys.has(t.accountKey) && !t.billingMonth && bmById[t.id]){ t.billingMonth=bmById[t.id]; changed++; } });
+  return changed;
 }
 
 // ═══════════════════════════
@@ -2289,6 +2332,7 @@ function renderDupCleanup(fresh){
   const accName=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?a.name:'';};
   if(!dupGroups.length){
     div.innerHTML='<div class="empty-state" style="padding:24px;">✅ לא נמצאו כפילויות<br><span style="font-size:11px;color:var(--text3);">כל התנועות ייחודיות.</span></div>';
+    const bar0=document.getElementById('dup-delbar'); if(bar0) bar0.style.display='none';
     return;
   }
   const selCount=Object.values(dupSelection).filter(Boolean).length;
@@ -2341,10 +2385,11 @@ function renderDupCleanup(fresh){
     </div>
     ${certainCnt?`<button class="btn-confirm-upload" style="width:100%;background:var(--surface2);color:var(--text2);border:1px solid var(--border2);margin-bottom:12px;font-size:13px;" onclick="dupSelectAllCertain()">✔️ בחר את כל הכפילויות הוודאיות (${certainCnt})</button>`:''}
     ${dupGroups.map(groupHtml).join('')}
-    <div style="position:sticky;bottom:74px;z-index:6;margin:8px -4px 0;padding:8px 4px 6px;background:var(--bg);border-top:1px solid var(--border);">
-      <button class="btn-confirm-upload" style="width:100%;background:var(--red-dim);color:var(--red);border:1px solid var(--red);font-weight:700;font-size:15px;" onclick="dupRemoveSelected()">🗑️ מחק ${selCount} תנועות שנבחרו</button>
-    </div>
-    <div style="height:8px;"></div>`;
+    <div style="height:96px;"></div>`;
+  const bar=document.getElementById('dup-delbar');
+  const btn=document.getElementById('dup-delbtn');
+  if(bar) bar.style.display='block';
+  if(btn) btn.textContent='🗑️ מחק '+selCount+' תנועות שנבחרו';
 }
 function dupToggle(id){
   const g=dupGroups.find(g=>g.items.some(i=>i.id===id)); if(!g) return;
@@ -2738,7 +2783,7 @@ function renderDashboard(){
   // Calculate totals from transactions for this month
   const ym=`${currentMonth.getFullYear()}-${String(currentMonth.getMonth()+1).padStart(2,'0')}`;
   const tIds=getExcludedTxIds();
-  const monthTx=transactions.filter(t=>t.date&&t.date.startsWith(ym));
+  const monthTx=transactions.filter(t=>txMonth(t)===ym);
   const expenses=monthTx.filter(t=>t.amount<0&&!tIds.has(t.id)).reduce((s,t)=>s+Math.abs(t.amount),0);
   const income=monthTx.filter(t=>t.amount>0&&!tIds.has(t.id)).reduce((s,t)=>s+t.amount,0);
   document.getElementById('db-total-expense').textContent=fmtAmount(expenses);
@@ -3553,19 +3598,18 @@ async function confirmUpload(fileId){
   if(!pf||!pf.assignedKey){showToast('⚠️ בחר חשבון תחילה','error');return;}
   const result=pf.aiResult||{};
 
-  // ── Card statement = ONE per month (v2.50). If the assigned account is a credit card and any month
-  //    it covers already has a file on that card → block with a strict replace/cancel prompt. This is
-  //    MONTH-BASED (uses coveredMonths, which every file has — including old ones), so it catches
-  //    re-uploads that the chargeSummaries check missed: old files with no summaries, re-parses with
-  //    different wording, and files whose fileType was mis-detected. Banks are intentionally exempt
-  //    (overlapping bank ranges are legitimate and handled by per-tx dedup + balance continuity).
+  // ── Card statement = ONE per BILLING month (v2.50, fixed v2.56). A card statement's identity is its
+  //    billing month — the month of its latest settlement/charge date — NOT the span of its transaction
+  //    dates. Installment rows carry the ORIGINAL purchase date (e.g. a "תשלום 9 מתוך 10" row dated
+  //    29/06/25 inside a March statement), so coveredMonths over-reports and makes consecutive statements
+  //    look overlapping. Using the billing month (latest chargeSummary date, or latest tx date as fallback)
+  //    distinguishes 10/03 (March) from 10/04 (April) correctly, while still catching a true re-upload of
+  //    the same statement (same billing month). Banks are exempt (overlapping ranges are legitimate there).
   if(!pf.statementMatchAcked){
     const _acc=getAllAccounts().find(a=>a.key===pf.assignedKey);
     if(_acc && _acc.type==='card'){
-      const _dr0=result.estimatedDateRange||{from:getCurrentYYYYMM(),to:getCurrentYYYYMM()};
-      const _newMonths=(result.coveredMonths&&result.coveredMonths.length)?result.coveredMonths:getMonthsBetween(_dr0.from,_dr0.to);
-      const _conf=findOverlapConflicts(pf.assignedKey,_newMonths);
-      if(_conf.length){ showCardMonthConflict(pf,_conf,_newMonths); return; }
+      const _conf=_cardBillingConflicts(pf.assignedKey, {chargeSummaries:result.chargeSummaries, dateRange:result.estimatedDateRange, coveredMonths:result.coveredMonths});
+      if(_conf.length){ showCardMonthConflict(pf,_conf,_conf[0].shared); return; }
       // same statement found on a DIFFERENT card → probably the wrong card was selected (kept as a helpful check)
       const otherMatch=findStatementMatchOtherAccount(pf.assignedKey, result.chargeSummaries);
       if(otherMatch){ showStatementOnOtherCard(pf, otherMatch); return; }
@@ -3634,6 +3678,14 @@ async function confirmUpload(fileId){
   let covered = skipped>0
     ? [...new Set(toAdd.map(t=>(t.date||dr.from+'-01').slice(0,7)))].sort()
     : (result.coveredMonths&&result.coveredMonths.length?result.coveredMonths:getMonthsBetween(dr.from,dr.to));
+  // v2.57: a credit-card statement covers exactly ONE month — its BILLING month (date of the last charge).
+  // Transaction dates inside it can reach far back (installment rows carry the original purchase date),
+  // so we must NOT derive a card file's coverage from transaction dates. This billing month drives the
+  // completeness engine, the uploaded-files display, and overlap detection — consistently everywhere.
+  if(_ddAcc && _ddAcc.type==='card'){
+    const _bm=_cardBillingMonth({chargeSummaries:result.chargeSummaries, dateRange:dr, coveredMonths:covered});
+    if(_bm) covered=[_bm];
+  }
 
   const isFirstFile = uploadedFiles.filter(f=>f.accountKey===pf.assignedKey).length===0;
   uploadedFiles.push({fileId:pf.fileId,accountKey:pf.assignedKey,dateRange:dr,coveredMonths:covered,txCount:toAdd.length,fileName:pf.file.name,summary:result.summary||{},chargeSummaries:result.chargeSummaries||[]});
@@ -3646,8 +3698,9 @@ async function confirmUpload(fileId){
       .catch(()=>{ origFileKeys.delete(pf.fileId); });
   }
 
+  const _cardBM = (_ddAcc && _ddAcc.type==='card' && covered.length===1) ? covered[0] : null;
   toAdd.forEach((t,i)=>{
-    transactions.push({id:pf.fileId+'_'+i,accountKey:pf.assignedKey,date:t.date||dr.from+'-01',desc:t.desc||'פעולה',amount:t.amount||0,balance:t.balance||null,category:classifyTx(t.desc,t.amount,t.incomeType),source:pf.file.name});
+    transactions.push({id:pf.fileId+'_'+i,accountKey:pf.assignedKey,date:t.date||dr.from+'-01',desc:t.desc||'פעולה',amount:t.amount||0,balance:t.balance||null,category:classifyTx(t.desc,t.amount,t.incomeType),source:pf.file.name,billingMonth:_cardBM||undefined});
   });
 
   // Add adjustment row if user provided one (from unresolved balance gap)
@@ -4137,7 +4190,7 @@ function recLast12Months(){
 // Apply the active range to a list. Supports 'all', 'year', '3m', and 'm:YYYY-MM' (single month).
 function recRangeApply(list, range){
   if(!range || range==='all') return list;
-  if(range.indexOf('m:')===0){ const mo=range.slice(2); return list.filter(t=>(t.date||'').slice(0,7)===mo); }
+  if(range.indexOf('m:')===0){ const mo=range.slice(2); return list.filter(t=>txMonth(t)===mo); }
   const cutoff=recRangeCutoff(range);
   return cutoff ? list.filter(t=>(t.date||'')>=cutoff) : list;
 }
@@ -4756,7 +4809,7 @@ function setReportMode(mode){
   }
   if(mode==='month'){
     // default to latest month with data
-    const ds=transactions.map(t=>(t.date||'').slice(0,7)).filter(Boolean).sort();
+    const ds=transactions.map(txMonth).filter(Boolean).sort();
     reportMonth=ds.length?ds[ds.length-1]:'2026-05';
   }
   renderReports();
@@ -4783,8 +4836,9 @@ function getActiveRange(){
   // returns {fromYM,toYM,fromDate,toDate,labelText,months[]}
   if(reportMode==='all'){
     const ds=transactions.map(t=>t.date).filter(Boolean).sort();
-    const fromYM=ds.length?ds[0].slice(0,7):'2026-01';
-    const toYM=ds.length?ds[ds.length-1].slice(0,7):'2026-05';
+    const ms=transactions.map(txMonth).filter(Boolean).sort();
+    const fromYM=ms.length?ms[0]:'2026-01';
+    const toYM=ms.length?ms[ms.length-1]:'2026-05';
     return {fromDate:ds[0]||'2026-01-01',toDate:ds[ds.length-1]||'2026-05-31',
       months:getMonthsBetween(fromYM,toYM),
       label:MONTHS_FULL[parseInt(fromYM.split('-')[1])-1]+' – '+MONTHS_FULL[parseInt(toYM.split('-')[1])-1]+' '+toYM.split('-')[0]};
@@ -4838,7 +4892,7 @@ function renderReports(){
   const trendTitle=document.querySelector('#screen-reports .section-title');
   if(months.length>1){
     trend=months.map(ym=>{
-      const mtx=visTx.filter(t=>(t.date||'').slice(0,7)===ym);
+      const mtx=visTx.filter(t=>txMonth(t)===ym);
       return {label:MONTHS_HE[parseInt(ym.split('-')[1])-1], exp:mtx.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0), inc:mtx.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)};
     });
     if(trendTitle)trendTitle.innerHTML='📈 מגמה חודשית';
@@ -5924,6 +5978,7 @@ async function loadFromCloud(uid){
           cardChargeResolved = d.cardChargeResolved||[];
           cardSettlementResolved = d.cardSettlementResolved||[];
           migrateIncomeCategories();
+          backfillCardBillingMonths();
           reconcileSignsFromBalance();
           detectInternalTransfers();
           detectCardChargeMatches();
@@ -6117,7 +6172,7 @@ async function sendChatMessage(){
     .map(([n,a])=>`${n}: ₪${Math.round(a).toLocaleString()}`).join(', ');
   const monthlyTotals = {};
   allTx.forEach(t=>{
-    const m = (t.date||'').slice(0,7);
+    const m = txMonth(t);
     if(!m) return;
     if(!monthlyTotals[m]) monthlyTotals[m] = {exp:0,inc:0};
     if(t.amount<0) monthlyTotals[m].exp += Math.abs(t.amount); else monthlyTotals[m].inc += t.amount;
