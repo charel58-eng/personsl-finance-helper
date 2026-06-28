@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.48";
+const APP_VERSION = "2.49";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -2060,6 +2060,38 @@ function showStatementReplace(pf, existingFile){
       <button class="btn-confirm-upload" style="width:100%;background:var(--surface2);color:var(--text3);border:1px solid var(--border);margin-top:6px;" onclick="removePendingFile('${pf.fileId}')">ביטול ההעלאה</button>
     </div>`;
 }
+// Same statement found on a DIFFERENT account → likely the wrong card was selected.
+function findStatementMatchOtherAccount(accountKey, newChargeSummaries){
+  const newSig=_chargeSig(newChargeSummaries);
+  if(!newSig.length) return null;
+  const newSet=new Set(newSig);
+  let best=null, bestOverlap=0;
+  uploadedFiles.filter(f=>f.accountKey!==accountKey).forEach(f=>{
+    const exSig=_chargeSig(f.chargeSummaries);
+    if(!exSig.length) return;
+    const overlap=exSig.filter(s=>newSet.has(s)).length;
+    if(overlap>bestOverlap){ bestOverlap=overlap; best=f; }
+  });
+  return (best && bestOverlap>=Math.ceil(newSig.length/2)) ? best : null;
+}
+// Prompt: "this statement already exists on a DIFFERENT card — you probably picked the wrong card."
+function showStatementOnOtherCard(pf, otherFile){
+  const assignDiv=document.getElementById('assign_'+pf.fileId);
+  if(!assignDiv)return;
+  const accName=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?a.name:'';};
+  const otherAccName=accName(otherFile.accountKey), thisAccName=accName(pf.assignedKey);
+  const cnt=txIdsOfFile(otherFile.fileId).length;
+  assignDiv.innerHTML=`
+    <div style="padding:12px;background:var(--surface2);border-radius:10px;margin-top:8px;border:1px solid var(--red);">
+      <div style="font-size:13px;font-weight:800;color:var(--red);margin-bottom:6px;">🛑 ייתכן שבחרת כרטיס לא נכון</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6;">
+        הפירוט הזה כבר קיים תחת <b>${escHtml(otherAccName)}</b> (${escHtml(otherFile.fileName||'דף קיים')} · ${cnt} פעולות) — ולא תחת <b>${escHtml(thisAccName)}</b> שבחרת עכשיו.<br>
+        אם בחרת כרטיס שגוי — בטל ובחר את הכרטיס הנכון. הוספה בכל זאת תיצור <b>כפילות על שני הכרטיסים</b>.
+      </div>
+      <button class="btn-confirm-upload" style="width:100%;background:var(--surface2);color:var(--text2);border:1px solid var(--border2);margin-bottom:6px;" onclick="removePendingFile('${pf.fileId}')">ביטול — אבחר כרטיס נכון</button>
+      <button class="btn-confirm-upload" style="width:100%;background:var(--red-dim);color:var(--red);border:1px solid var(--red);" onclick="forceUploadKeepBoth('${pf.fileId}')">בכל זאת הוסף ל-${escHtml(thisAccName)}</button>
+    </div>`;
+}
 // user chose to ignore the statement-match warning and add anyway
 function forceUploadKeepBoth(fileId){
   const pf=pendingFiles.find(f=>f.fileId===fileId);
@@ -3055,6 +3087,7 @@ ${contentForAI}
     ambiguousReason: parsed.ambiguousReason || (ambiguous ? 'בחר חשבון ידנית' : null),
     fileType: parsed.fileType || 'unknown',
     bankOrCardName: parsed.bankOrCardName || '',
+    detectedLast4: (parsed.detectedLast4||'').toString().replace(/\D/g,'').slice(-4) || null,
     estimatedDateRange: {
       from: (parsed.coveredMonths||[]).sort()[0] || getCurrentYYYYMM(),
       to:   (parsed.coveredMonths||[]).sort().slice(-1)[0] || getCurrentYYYYMM(),
@@ -3188,6 +3221,14 @@ function accountName(key){
 function checkLogoMatch(result, accountKey){
   const acc=getAllAccounts().find(a=>a.key===accountKey);
   if(!acc) return {ok:true};
+  // Precise check: when both the file and the chosen account expose the card's last-4 digits,
+  // compare those directly. This catches even same-issuer mix-ups (e.g. two different Cal cards).
+  const fileDigits=(result.detectedLast4||'').toString().replace(/\D/g,'').slice(-4);
+  const accDigits=(acc.digits||'').toString().replace(/\D/g,'').slice(-4);
+  if(fileDigits && accDigits){
+    return fileDigits===accDigits ? {ok:true} : {ok:false, digitMismatch:true, fileDigits, accDigits};
+  }
+  // Fallback: issuer-name heuristic (when digits aren't available on one side).
   const detected=(result.bankOrCardName||'').toLowerCase();
   if(!detected) return {ok:true};
   const entity=acc.entityId;
@@ -3249,8 +3290,12 @@ function checkCardChargeMatch(result, accountKey){
 function runValidations(result, accountKey){
   const issues=[];
   const c1=checkLogoMatch(result, accountKey);
-  if(!c1.ok) issues.push({type:'logo', severity:'warn',
-    text:`הקובץ זוהה כ"${c1.detected}" אך נבחר חשבון ${accountName(accountKey)}. ייתכן שזה החשבון הלא נכון.`});
+  if(!c1.ok){
+    if(c1.digitMismatch) issues.push({type:'logo', severity:'severe',
+      text:`אי-התאמת כרטיס: הדף שייך לכרטיס שמסתיים ב-••${c1.fileDigits}, אך בחרת חשבון ${accountName(accountKey)} (••${c1.accDigits}). סביר שזה הכרטיס הלא נכון — בדוק לפני שמירה.`});
+    else issues.push({type:'logo', severity:'warn',
+      text:`הקובץ זוהה כ"${c1.detected}" אך נבחר חשבון ${accountName(accountKey)}. ייתכן שזה החשבון הלא נכון.`});
+  }
   const c2=checkBalanceContinuity(result, accountKey);
   if(!c2.ok) issues.push({type:'balance', severity:'warn',
     text:`פער ביתרות: היתרה האחרונה הידועה (${c2.lastKnownDate}) ${fmtAmount(c2.lastKnownBalance)}, אך הקובץ נפתח ב-${fmtAmount(c2.fileOpeningBalance)}. פער ${fmtAmount(c2.gap)}.`,
@@ -3279,6 +3324,8 @@ async function confirmUpload(fileId){
   if(!pf.statementMatchAcked && result.fileType==='card_statement'){
     const stMatch=findStatementMatch(pf.assignedKey, result.chargeSummaries);
     if(stMatch){ showStatementReplace(pf, stMatch); return; }
+    const otherMatch=findStatementMatchOtherAccount(pf.assignedKey, result.chargeSummaries);
+    if(otherMatch){ showStatementOnOtherCard(pf, otherMatch); return; }
   }
 
   // ── Date range + de-duplicate against transactions that already exist for this account ──
