@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.52";
+const APP_VERSION = "2.53";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -2296,7 +2296,11 @@ function renderDupCleanup(fresh){
   const extra=dupGroups.reduce((s,g)=>s+(g.items.length-1),0);
   const dupSum=dupGroups.reduce((s,g)=>s+Math.abs(g.amount)*(g.items.length-1),0);
   const metric=(v,l,c)=>`<div style="background:var(--surface3);border-radius:8px;padding:10px;text-align:center;"><div style="font-size:18px;font-weight:800;${c?('color:'+c+';'):''}">${v}</div><div style="font-size:11px;color:var(--text3);">${l}</div></div>`;
+  const fmtDateHe=d=>{ if(!d) return ''; const s=''+d; const dt=new Date(s.length<=7?s+'-01':s); return isNaN(dt.getTime())?s:dt.toLocaleDateString('he-IL'); };
+  const signedAmt=a=>(a<0?'−':'')+fmtAmount(a);
   const groupHtml=g=>{
+    const dHe=fmtDateHe(g.date);
+    const amtTxt=signedAmt(g.amount);
     const tag=g.certain
       ? '<span style="font-size:11px;background:var(--red-dim);color:var(--red);padding:2px 8px;border-radius:6px;white-space:nowrap;">ודאי</span>'
       : '<span style="font-size:11px;background:var(--amber-dim,rgba(255,176,32,.15));color:var(--amber);padding:2px 8px;border-radius:6px;white-space:nowrap;">לבדיקה</span>';
@@ -2307,19 +2311,22 @@ function renderDupCleanup(fresh){
       const ico=sel?'🗑️':'⬜';
       const bg=sel?'background:var(--red-dim);':'';
       const txtCol=sel?'color:var(--red);text-decoration:line-through;':'color:var(--text);';
+      const amtCol=sel?'var(--red)':'var(--text2)';
       const tail=sel?'<span style="font-size:11px;color:var(--red);white-space:nowrap;">יימחק</span>':(i.id===g.keeperId?'<span style="font-size:11px;color:var(--green);white-space:nowrap;">יישמר</span>':'');
-      return `<div onclick="dupToggle('${i.id}')" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-top:1px solid var(--border);cursor:pointer;${bg}">
-        <div style="font-size:16px;">${ico}</div>
+      return `<div onclick="dupToggle('${i.id}')" style="display:flex;align-items:center;gap:10px;padding:10px;border-top:1px solid var(--border);cursor:pointer;${bg}">
+        <div style="font-size:18px;flex-shrink:0;">${ico}</div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;${txtCol}">${escHtml(i.desc||'פעולה')}</div>
-          <div style="font-size:11px;color:var(--text3);">📄 ${escHtml(i.source||'מקור לא ידוע')}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px;"><span style="color:${amtCol};font-weight:700;">${amtTxt}</span> · 📅 ${escHtml(dHe)} · 📄 ${escHtml(i.source||'מקור לא ידוע')}</div>
         </div>${tail}
       </div>`;
     }).join('');
     return `<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:10px;background:var(--surface3);">
-        <div style="min-width:0;"><div style="font-size:14px;font-weight:700;">${escHtml(g.items[0].desc.slice(0,28)||'פעולה')}</div>
-        <div style="font-size:12px;color:var(--text2);">${escHtml(g.date||'')} · ${fmtAmount(g.amount)} · ${escHtml(accName(g.accountKey))}</div></div>${tag}
+        <div style="min-width:0;flex:1;">
+          <div style="font-size:14px;font-weight:700;">${escHtml((g.items[0].desc||'פעולה').slice(0,34))}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:3px;line-height:1.6;"><span style="color:var(--red);font-weight:800;font-size:14px;">${amtTxt}</span> · 📅 ${escHtml(dHe)} · ${escHtml(accName(g.accountKey))} · ${g.items.length} עותקים</div>
+        </div>${tag}
       </div>${note}${rows}
     </div>`;
   };
@@ -2329,9 +2336,12 @@ function renderDupCleanup(fresh){
       ${metric(extra,'מיותרות','')}
       ${metric(fmtAmount(dupSum),'סכום כפול','var(--red)')}
     </div>
+    <div style="background:var(--surface3);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:12px;">
+      ℹ️ בכל קבוצה מוצגות הכפילויות. <span style="color:var(--red);font-weight:700;">אדום = יימחק</span> · <span style="color:var(--green);font-weight:700;">ירוק = יישמר</span>. הקש על שורה כדי לסמן/לבטל, ואז «🗑️ מחק» למטה. תמיד נשאר עותק אחד בכל קבוצה.
+    </div>
     ${certainCnt?`<button class="btn-confirm-upload" style="width:100%;background:var(--surface2);color:var(--text2);border:1px solid var(--border2);margin-bottom:12px;font-size:13px;" onclick="dupSelectAllCertain()">✔️ בחר את כל הכפילויות הוודאיות (${certainCnt})</button>`:''}
     ${dupGroups.map(groupHtml).join('')}
-    <button class="btn-confirm-upload" style="width:100%;background:var(--red-dim);color:var(--red);border:1px solid var(--red);font-weight:700;margin-top:4px;" onclick="dupRemoveSelected()">🗑️ מחק ${selCount} תנועות שנבחרו</button>`;
+    <button class="btn-confirm-upload" style="width:100%;background:var(--red-dim);color:var(--red);border:1px solid var(--red);font-weight:700;margin-top:4px;margin-bottom:16px;" onclick="dupRemoveSelected()">🗑️ מחק ${selCount} תנועות שנבחרו</button>`;
 }
 function dupToggle(id){
   const g=dupGroups.find(g=>g.items.some(i=>i.id===id)); if(!g) return;
