@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.51";
+const APP_VERSION = "2.52";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -1066,6 +1066,11 @@ button{cursor:pointer;}
       <div class="set-nav-txt"><div class="set-nav-name">דפים שהועלו</div><div class="set-nav-sub">קבצים שנקלטו במערכת</div></div>
       <div class="set-nav-arrow">‹</div>
     </div>
+    <div class="set-nav-row" onclick="openSettingsSub('dups')">
+      <div class="set-nav-ico">🧹</div>
+      <div class="set-nav-txt"><div class="set-nav-name">ניקוי כפילויות <span id="dups-nav-badge" style="display:none;background:var(--red);color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;margin-right:4px;"></span></div><div class="set-nav-sub">איתור והסרה של תנועות כפולות</div></div>
+      <div class="set-nav-arrow">‹</div>
+    </div>
     <div class="set-nav-row" onclick="openSettingsSub('general')">
       <div class="set-nav-ico">⚙️</div>
       <div class="set-nav-txt"><div class="set-nav-name">כללי ומתקדם</div><div class="set-nav-sub">תזכורות, תאריך התחלה, איפוס</div></div>
@@ -1166,6 +1171,23 @@ button{cursor:pointer;}
   </div>
   <div class="settings-section">
     <div id="settings-files"></div>
+  </div>
+  <div class="bottom-nav">
+    <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
+    <div class="nav-item" onclick="showReports()"><div class="nav-icon">📊</div><div class="nav-label">דוחות</div></div>
+    <div class="nav-item" onclick="showChat()"><div class="nav-icon">🧠</div><div class="nav-label">AI צ'אט</div></div>
+    <div class="nav-item active"><div class="nav-icon">⚙️</div><div class="nav-label">הגדרות</div></div>
+  </div>
+</div>
+
+<!-- ═══ SETTINGS SUB: DUPLICATES ═══ -->
+<div class="screen" id="screen-set-dups">
+  <div class="upload-header">
+    <div class="back-btn" onclick="showSettings()">←</div>
+    <div class="page-title">🧹 ניקוי כפילויות</div>
+  </div>
+  <div class="settings-section">
+    <div id="settings-dups"></div>
   </div>
   <div class="bottom-nav">
     <div class="nav-item" onclick="showDashboard()"><div class="nav-icon">🏠</div><div class="nav-label">נתונים</div></div>
@@ -2201,6 +2223,155 @@ function resolveCardConflictByReplace(pendingId){
 }
 
 // ═══════════════════════════
+//  DUPLICATE CLEANUP TOOL (v2.52) — find & remove duplicate transactions already in the data
+// ═══════════════════════════
+// Groups likely-duplicate transactions and lets the user remove extras with manual review.
+// Grouping key (per account):
+//   • bank row WITH a balance → date | amount | BALANCE   (balance is a per-row fingerprint → certain dup)
+//   • otherwise               → date | amount | canon(desc) (merchant prefix + installment token)
+// "Certain" = balance-match, OR copies that came from ≥2 different uploaded files (re-upload). These are
+// pre-selected (keeping the copy from the newest file). "Review" = copies from the SAME file (could be a
+// real identical charge) → never pre-selected. Removal is manual + confirmed; we never auto-delete.
+let dupGroups=[], dupSelection={};
+function _dupHasBal(t){return t&&t.balance!=null&&t.balance!==''&&!isNaN(Number(t.balance));}
+function _dupCanon(s){
+  s=(s||'').toString();
+  const m=s.match(/תשלום\s*(\d+)\s*(?:מתוך|\/)\s*(\d+)/);
+  let core=s.replace(/[()\[\]{}"'’.,\-–—:|\/]/g,' ');
+  core=core.replace(/תשלום\s*\d+\s*(?:מתוך|\/)\s*\d+/g,' ').replace(/תשלומים/g,' ').replace(/סה"כ\s*עסקה?/g,' ');
+  core=core.replace(/\s+/g,' ').trim().toLowerCase();
+  const tokens=core.split(' ').filter(Boolean).slice(0,3).join(' ');
+  return tokens+(m?('#'+m[1]+'/'+m[2]):'');
+}
+function scanDuplicates(){
+  const accType={}; getAllAccounts().forEach(a=>accType[a.key]=a.type);
+  const txFileIdx={}, txFileName={};
+  (uploadedFiles||[]).forEach((f,idx)=>{ txIdsOfFile(f.fileId).forEach(id=>{ txFileIdx[id]=idx; txFileName[id]=f.fileName||''; }); });
+  const groups={};
+  transactions.forEach(t=>{
+    if(!t || t.isAdjustment || !t.amount) return;
+    const isBankAcc = accType[t.accountKey]==='bank';
+    const byBal = isBankAcc && _dupHasBal(t);
+    const cents=Math.round((t.amount||0)*100);
+    const key = byBal
+      ? t.accountKey+'|'+(t.date||'')+'|'+cents+'|B'+Math.round(Number(t.balance)*100)
+      : t.accountKey+'|'+(t.date||'')+'|'+cents+'|C'+_dupCanon(t.desc);
+    const g = groups[key] || (groups[key]={key, accountKey:t.accountKey, date:t.date, amount:t.amount, byBalance:byBal, items:[]});
+    g.items.push({ id:t.id, desc:t.desc||'', fileIdx:(txFileIdx[t.id]!=null?txFileIdx[t.id]:-1), source:(txFileName[t.id]||t.source||'') });
+  });
+  const out=[];
+  Object.values(groups).forEach(g=>{
+    if(g.items.length<2) return;
+    const fileIdxs=new Set(g.items.map(i=>i.fileIdx));
+    g.certain = g.byBalance ? true : (fileIdxs.size>=2);
+    let keeper=g.items[0]; g.items.forEach(i=>{ if(i.fileIdx>keeper.fileIdx) keeper=i; });
+    g.keeperId=keeper.id;
+    out.push(g);
+  });
+  out.sort((a,b)=>(b.certain-a.certain)||(Math.abs(b.amount)-Math.abs(a.amount)));
+  return out;
+}
+function _dupPreselect(groups){
+  const sel={};
+  groups.forEach(g=>{ if(!g.certain) return; g.items.forEach(i=>{ if(i.id!==g.keeperId) sel[i.id]=true; }); });
+  return sel;
+}
+function updateDupNavBadge(){
+  try{
+    const b=document.getElementById('dups-nav-badge'); if(!b) return;
+    const n=scanDuplicates().length;
+    if(n>0){ b.textContent=n; b.style.display='inline-block'; } else { b.style.display='none'; }
+  }catch(e){}
+}
+function renderDupCleanup(fresh){
+  if(fresh){ dupGroups=scanDuplicates(); dupSelection=_dupPreselect(dupGroups); }
+  const div=document.getElementById('settings-dups'); if(!div) return;
+  const accName=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?a.name:'';};
+  if(!dupGroups.length){
+    div.innerHTML='<div class="empty-state" style="padding:24px;">✅ לא נמצאו כפילויות<br><span style="font-size:11px;color:var(--text3);">כל התנועות ייחודיות.</span></div>';
+    return;
+  }
+  const selCount=Object.values(dupSelection).filter(Boolean).length;
+  const certainCnt=dupGroups.filter(g=>g.certain).length;
+  const extra=dupGroups.reduce((s,g)=>s+(g.items.length-1),0);
+  const dupSum=dupGroups.reduce((s,g)=>s+Math.abs(g.amount)*(g.items.length-1),0);
+  const metric=(v,l,c)=>`<div style="background:var(--surface3);border-radius:8px;padding:10px;text-align:center;"><div style="font-size:18px;font-weight:800;${c?('color:'+c+';'):''}">${v}</div><div style="font-size:11px;color:var(--text3);">${l}</div></div>`;
+  const groupHtml=g=>{
+    const tag=g.certain
+      ? '<span style="font-size:11px;background:var(--red-dim);color:var(--red);padding:2px 8px;border-radius:6px;white-space:nowrap;">ודאי</span>'
+      : '<span style="font-size:11px;background:var(--amber-dim,rgba(255,176,32,.15));color:var(--amber);padding:2px 8px;border-radius:6px;white-space:nowrap;">לבדיקה</span>';
+    const note=g.certain ? '' :
+      `<div style="font-size:11px;color:var(--text3);padding:6px 10px;line-height:1.5;border-top:1px solid var(--border);">⚠️ העותקים מאותו קובץ — ייתכן שזו עסקה כפולה אמיתית. לא נבחר אוטומטית.</div>`;
+    const rows=g.items.map(i=>{
+      const sel=!!dupSelection[i.id];
+      const ico=sel?'🗑️':'⬜';
+      const bg=sel?'background:var(--red-dim);':'';
+      const txtCol=sel?'color:var(--red);text-decoration:line-through;':'color:var(--text);';
+      const tail=sel?'<span style="font-size:11px;color:var(--red);white-space:nowrap;">יימחק</span>':(i.id===g.keeperId?'<span style="font-size:11px;color:var(--green);white-space:nowrap;">יישמר</span>':'');
+      return `<div onclick="dupToggle('${i.id}')" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-top:1px solid var(--border);cursor:pointer;${bg}">
+        <div style="font-size:16px;">${ico}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;${txtCol}">${escHtml(i.desc||'פעולה')}</div>
+          <div style="font-size:11px;color:var(--text3);">📄 ${escHtml(i.source||'מקור לא ידוע')}</div>
+        </div>${tail}
+      </div>`;
+    }).join('');
+    return `<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:10px;background:var(--surface3);">
+        <div style="min-width:0;"><div style="font-size:14px;font-weight:700;">${escHtml(g.items[0].desc.slice(0,28)||'פעולה')}</div>
+        <div style="font-size:12px;color:var(--text2);">${escHtml(g.date||'')} · ${fmtAmount(g.amount)} · ${escHtml(accName(g.accountKey))}</div></div>${tag}
+      </div>${note}${rows}
+    </div>`;
+  };
+  div.innerHTML=`
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;">
+      ${metric(dupGroups.length,'קבוצות','')}
+      ${metric(extra,'מיותרות','')}
+      ${metric(fmtAmount(dupSum),'סכום כפול','var(--red)')}
+    </div>
+    ${certainCnt?`<button class="btn-confirm-upload" style="width:100%;background:var(--surface2);color:var(--text2);border:1px solid var(--border2);margin-bottom:12px;font-size:13px;" onclick="dupSelectAllCertain()">✔️ בחר את כל הכפילויות הוודאיות (${certainCnt})</button>`:''}
+    ${dupGroups.map(groupHtml).join('')}
+    <button class="btn-confirm-upload" style="width:100%;background:var(--red-dim);color:var(--red);border:1px solid var(--red);font-weight:700;margin-top:4px;" onclick="dupRemoveSelected()">🗑️ מחק ${selCount} תנועות שנבחרו</button>`;
+}
+function dupToggle(id){
+  const g=dupGroups.find(g=>g.items.some(i=>i.id===id)); if(!g) return;
+  if(!dupSelection[id]){
+    const remaining=g.items.filter(i=>!dupSelection[i.id] && i.id!==id).length;
+    if(remaining<1){ showToast('צריך להשאיר עותק אחד בקבוצה','error'); return; }
+    dupSelection[id]=true;
+  } else { delete dupSelection[id]; }
+  renderDupCleanup(false);
+}
+function dupSelectAllCertain(){
+  dupGroups.forEach(g=>{ if(!g.certain) return; g.items.forEach(i=>{ if(i.id!==g.keeperId) dupSelection[i.id]=true; }); });
+  renderDupCleanup(false);
+}
+function dupRemoveSelected(){
+  const ids=Object.keys(dupSelection).filter(id=>dupSelection[id]);
+  if(!ids.length){ showToast('לא נבחרו פעולות למחיקה','error'); return; }
+  if(!confirm(ids.length+' פעולות כפולות יימחקו לצמיתות. להמשיך?')) return;
+  const removed=new Set(ids);
+  const affected=new Set();
+  (uploadedFiles||[]).forEach(f=>{ txIdsOfFile(f.fileId).forEach(tid=>{ if(removed.has(tid)) affected.add(f.fileId); }); });
+  transactions=transactions.filter(t=>!removed.has(t.id));
+  transferLinks=transferLinks.filter(l=>!removed.has(l.a)&&!removed.has(l.b));
+  cardChargeMatches=cardChargeMatches.filter(m=>!removed.has(m.bankTxId));
+  // drop uploaded-file entries that are now empty as a result
+  const emptied=[];
+  (uploadedFiles||[]).forEach(f=>{ if(affected.has(f.fileId) && txIdsOfFile(f.fileId).length===0) emptied.push(f.fileId); });
+  emptied.forEach(fid=>{ uploadedFiles=uploadedFiles.filter(x=>x.fileId!==fid); origFileKeys.delete(fid); idbDeleteFile(fid); });
+  detectInternalTransfers();
+  detectCardChargeMatches();
+  saveState(); saveTx();
+  if(typeof currentUser!=='undefined' && currentUser) saveToCloud();
+  dupSelection={};
+  showToast('🗑️ '+ids.length+' כפילויות נמחקו'+(emptied.length?(' · '+emptied.length+' דפים ריקים הוסרו'):''));
+  renderDupCleanup(true);
+  updateDupNavBadge();
+  if(document.getElementById('screen-dashboard')?.classList.contains('active'))renderDashboard();
+}
+
+// ═══════════════════════════
 //  COMPLETENESS ENGINE
 // ═══════════════════════════
 // Effective start month for an account = the LATER of the global tracking start and the
@@ -2501,7 +2672,7 @@ function showSettings(){showScreen('screen-settings');renderSettings();}
 function openSettingsSub(which){
   const map={
     banks:'screen-set-banks', cards:'screen-set-cards', cats:'screen-set-cats',
-    notes:'screen-set-notes', files:'screen-set-files', general:'screen-set-general'
+    notes:'screen-set-notes', files:'screen-set-files', dups:'screen-set-dups', general:'screen-set-general'
   };
   const scr=map[which]; if(!scr) return;
   showScreen(scr);
@@ -2510,6 +2681,7 @@ function openSettingsSub(which){
   else if(which==='cats'){ const s=document.getElementById('cat-search'); if(s) s.value=''; renderCategoriesManager(); }
   else if(which==='notes') renderNotesArchive();
   else if(which==='files') renderUploadedFiles();
+  else if(which==='dups') renderDupCleanup(true);
   else if(which==='general') renderGeneralSettings();
 }
 function renderGeneralSettings(){
@@ -2520,7 +2692,7 @@ function renderGeneralSettings(){
 }
 // True if the main settings screen OR any settings sub-screen is active
 function settingsScreenActive(){
-  return ['screen-settings','screen-set-banks','screen-set-cards','screen-set-cats','screen-set-notes','screen-set-files','screen-set-general']
+  return ['screen-settings','screen-set-banks','screen-set-cards','screen-set-cats','screen-set-notes','screen-set-files','screen-set-dups','screen-set-general']
     .some(id=>document.getElementById(id)?.classList.contains('active'));
 }
 // Re-render whichever settings content is currently visible
@@ -5248,6 +5420,7 @@ function renderSettings(){
   renderUploadedFiles();
   renderCategoriesManager();
   const sv=document.getElementById('settings-version'); if(sv) sv.textContent='עוזר פיננסי אישי · גרסה '+APP_VERSION;
+  if(typeof updateDupNavBadge==='function') updateDupNavBadge();
 }
 
 function setCardBankLink(cardKey, bankKey){
