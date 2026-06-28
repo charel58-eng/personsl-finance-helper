@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.49";
+const APP_VERSION = "2.51";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -2150,6 +2150,56 @@ function showOverlapBlock(pf, conflicts){
     </div>`;
 }
 
+// ── Card "one statement per month" conflict prompt (v2.50) ──
+// Shown when a card upload covers a month that already has a file on that card.
+// Two visible choices only: Replace (delete the existing file[s] + their tx, then re-ingest) or Cancel.
+// "Keep both" is hidden behind an "advanced options" disclosure with an explicit duplicate warning.
+function showCardMonthConflict(pf, conflicts, newMonths){
+  const assignDiv=document.getElementById('assign_'+pf.fileId);
+  if(!assignDiv)return;
+  const accName=k=>{const a=getAllAccounts().find(x=>x.key===k);return a?a.name:'';};
+  const monthsLabel=arr=>(!arr||!arr.length)?'':(arr.length>1?ymLabel(arr[0])+' – '+ymLabel(arr[arr.length-1]):ymLabel(arr[0]));
+  const totalCnt=conflicts.reduce((s,c)=>s+txIdsOfFile(c.file.fileId).length,0);
+  const list=conflicts.map(c=>`<div style="font-size:12px;color:var(--text2);line-height:1.6;">• ${escHtml(c.file.fileName||'דף קיים')} · ${escHtml(monthsLabel(c.shared))} · ${txIdsOfFile(c.file.fileId).length} פעולות</div>`).join('');
+  assignDiv.innerHTML=`
+    <div style="padding:12px;background:var(--surface2);border-radius:10px;margin-top:8px;">
+      <div style="font-size:13px;font-weight:700;color:var(--amber);margin-bottom:6px;">⚠️ כבר קיים דף חיוב לחודש זה בכרטיס ${escHtml(accName(pf.assignedKey))}</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px;line-height:1.6;">
+        לכרטיס אשראי נשמר דף אחד בלבד לכל חודש. <b>החלפה</b> תמחק את הדף/ים הקיים/ים (${totalCnt} פעולות) ותקלוט את הדף החדש במקומם.
+      </div>
+      <div style="margin-bottom:10px;">${list}</div>
+      <button class="btn-confirm-upload" style="width:100%;background:var(--red-dim);color:var(--red);border:1px solid var(--red);margin-bottom:6px;" onclick="resolveCardConflictByReplace('${pf.fileId}')">🔄 החלף — מחק את הקיים וקלוט את החדש</button>
+      <button class="btn-confirm-upload" style="width:100%;background:var(--surface2);color:var(--text3);border:1px solid var(--border);" onclick="removePendingFile('${pf.fileId}')">ביטול ההעלאה</button>
+      <div style="margin-top:10px;text-align:center;">
+        <span id="adv_${pf.fileId}" onclick="toggleCardConflictAdv('${pf.fileId}')" style="font-size:11px;color:var(--text3);cursor:pointer;user-select:none;">אפשרויות מתקדמות ▾</span>
+      </div>
+      <div id="advbox_${pf.fileId}" style="display:none;margin-top:8px;padding:10px;background:var(--surface3);border:1px solid var(--red);border-radius:8px;">
+        <div style="font-size:11px;color:var(--red);margin-bottom:8px;line-height:1.5;">⚠️ פעולה זו תיצור כפילות מכוונת בחודש זה — שתי גרסאות של אותו דף יישמרו וההוצאות ייספרו פעמיים. השתמש רק אם אלה באמת שני דפים שונים.</div>
+        <button class="btn-confirm-upload" style="width:100%;background:var(--surface2);color:var(--text2);border:1px solid var(--border2);" onclick="forceUploadKeepBoth('${pf.fileId}')">➕ הוסף בכל זאת (שמור את שניהם)</button>
+      </div>
+    </div>`;
+}
+function toggleCardConflictAdv(fileId){
+  const box=document.getElementById('advbox_'+fileId);
+  const lbl=document.getElementById('adv_'+fileId);
+  if(!box)return;
+  const open=box.style.display!=='none';
+  box.style.display=open?'none':'block';
+  if(lbl) lbl.textContent=open?'אפשרויות מתקדמות ▾':'אפשרויות מתקדמות ▴';
+}
+// Replace: delete every existing file on this card that overlaps the new file's months, then re-run the upload.
+function resolveCardConflictByReplace(pendingId){
+  const pf=pendingFiles.find(f=>f.fileId===pendingId);
+  if(!pf)return;
+  const r=pf.aiResult||{};
+  const dr0=r.estimatedDateRange||{from:getCurrentYYYYMM(),to:getCurrentYYYYMM()};
+  const newMonths=(r.coveredMonths&&r.coveredMonths.length)?r.coveredMonths:getMonthsBetween(dr0.from,dr0.to);
+  const conflicts=findOverlapConflicts(pf.assignedKey,newMonths);
+  conflicts.forEach(c=>deleteUploadedFile(c.file.fileId));
+  if(conflicts.length) showToast('🗑️ '+conflicts.length+' דפים קיימים נמחקו — ממשיך בהעלאה');
+  confirmUpload(pendingId);
+}
+
 // ═══════════════════════════
 //  COMPLETENESS ENGINE
 // ═══════════════════════════
@@ -3318,27 +3368,63 @@ async function confirmUpload(fileId){
   if(!pf||!pf.assignedKey){showToast('⚠️ בחר חשבון תחילה','error');return;}
   const result=pf.aiResult||{};
 
-  // ── Statement-identity check (cards): same bank-charge summaries = same monthly statement re-uploaded ──
-  // Catches re-uploads even when per-transaction amounts changed (e.g. after a parser fix), because it
-  // matches on the stable "סה"כ חיובים בתאריך" lines. Per-tx dedup alone would miss this and duplicate the month.
-  if(!pf.statementMatchAcked && result.fileType==='card_statement'){
-    const stMatch=findStatementMatch(pf.assignedKey, result.chargeSummaries);
-    if(stMatch){ showStatementReplace(pf, stMatch); return; }
-    const otherMatch=findStatementMatchOtherAccount(pf.assignedKey, result.chargeSummaries);
-    if(otherMatch){ showStatementOnOtherCard(pf, otherMatch); return; }
+  // ── Card statement = ONE per month (v2.50). If the assigned account is a credit card and any month
+  //    it covers already has a file on that card → block with a strict replace/cancel prompt. This is
+  //    MONTH-BASED (uses coveredMonths, which every file has — including old ones), so it catches
+  //    re-uploads that the chargeSummaries check missed: old files with no summaries, re-parses with
+  //    different wording, and files whose fileType was mis-detected. Banks are intentionally exempt
+  //    (overlapping bank ranges are legitimate and handled by per-tx dedup + balance continuity).
+  if(!pf.statementMatchAcked){
+    const _acc=getAllAccounts().find(a=>a.key===pf.assignedKey);
+    if(_acc && _acc.type==='card'){
+      const _dr0=result.estimatedDateRange||{from:getCurrentYYYYMM(),to:getCurrentYYYYMM()};
+      const _newMonths=(result.coveredMonths&&result.coveredMonths.length)?result.coveredMonths:getMonthsBetween(_dr0.from,_dr0.to);
+      const _conf=findOverlapConflicts(pf.assignedKey,_newMonths);
+      if(_conf.length){ showCardMonthConflict(pf,_conf,_newMonths); return; }
+      // same statement found on a DIFFERENT card → probably the wrong card was selected (kept as a helpful check)
+      const otherMatch=findStatementMatchOtherAccount(pf.assignedKey, result.chargeSummaries);
+      if(otherMatch){ showStatementOnOtherCard(pf, otherMatch); return; }
+    }
   }
 
   // ── Date range + de-duplicate against transactions that already exist for this account ──
+  // v2.51: BANK dedup is balance-aware. The running balance is a per-row fingerprint, so for bank rows
+  // that carry a balance we key on date|amount|BALANCE instead of date|amount|description. This makes the
+  // dedup description-INSENSITIVE (a re-parse that worded the description differently no longer slips
+  // through as a "new" row), while staying safe: two genuinely different same-day same-amount rows show
+  // DIFFERENT balances, so they're never falsely merged. Backfilling older months still works — every
+  // file row is compared against ALL existing rows, not against a date watermark. Rows without a balance
+  // (cards, adjustments, old data) fall back to the description signature, so card behaviour is unchanged.
   const dr=result.estimatedDateRange||{from:getCurrentYYYYMM(),to:getCurrentYYYYMM()};
   const fileTx = result.allTransactions?.length ? result.allTransactions : (result.sampleTransactions||[]);
+  const _ddAcc=getAllAccounts().find(a=>a.key===pf.assignedKey);
+  const _isBankDD=!!(_ddAcc && _ddAcc.type==='bank');
   const _norm=s=>(s||'פעולה').toString().replace(/\s+/g,' ').trim();
   const _cents=a=>Math.round((a||0)*100);
-  const _sigFile=t=>(t.date||dr.from+'-01')+'|'+_cents(t.amount)+'|'+_norm(t.desc);
-  const _sigExist=t=>(t.date||'')+'|'+_cents(t.amount)+'|'+_norm(t.desc);
-  const existCount={};
-  transactions.filter(t=>t.accountKey===pf.assignedKey).forEach(t=>{const s=_sigExist(t);existCount[s]=(existCount[s]||0)+1;});
+  const _hasBal=t=>t&&t.balance!=null&&t.balance!==''&&!isNaN(Number(t.balance));
+  const _balKeyExist=t=>(t.date||'')+'|'+_cents(t.amount)+'|B'+_cents(t.balance);
+  const _balKeyFile=t=>(t.date||dr.from+'-01')+'|'+_cents(t.amount)+'|B'+_cents(t.balance);
+  const _descKeyExist=t=>(t.date||'')+'|'+_cents(t.amount)+'|D'+_norm(t.desc);
+  const _descKeyFile=t=>(t.date||dr.from+'-01')+'|'+_cents(t.amount)+'|D'+_norm(t.desc);
+  // Existing multiset: bank rows WITH a balance → balance index; everything else → description index.
+  const balCount={}, descCount={};
+  transactions.filter(t=>t.accountKey===pf.assignedKey).forEach(t=>{
+    if(_isBankDD && _hasBal(t)){ const k=_balKeyExist(t); balCount[k]=(balCount[k]||0)+1; }
+    else { const k=_descKeyExist(t); descCount[k]=(descCount[k]||0)+1; }
+  });
   const toAdd=[]; let skipped=0;
-  fileTx.forEach(t=>{const s=_sigFile(t); if(existCount[s]>0){existCount[s]--;skipped++;} else toAdd.push(t);});
+  fileTx.forEach(t=>{
+    let matched=false;
+    if(_isBankDD && _hasBal(t)){
+      const bk=_balKeyFile(t);
+      if(balCount[bk]>0){ balCount[bk]--; matched=true; }
+      else { const dk=_descKeyFile(t); if(descCount[dk]>0){ descCount[dk]--; matched=true; } } // existing copy stored without a balance
+    } else {
+      const dk=_descKeyFile(t);
+      if(descCount[dk]>0){ descCount[dk]--; matched=true; }
+    }
+    if(matched){ skipped++; } else { toAdd.push(t); }
+  });
   pf.hasOverlap = skipped>0; // file overlaps existing data → balance-continuity check is not meaningful
 
   // ── Fully-duplicate file: nothing new → offer delete-to-replace (no partial ingest possible) ──
