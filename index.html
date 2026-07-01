@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.58";
+const APP_VERSION = "2.59";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -3527,18 +3527,56 @@ function checkLogoMatch(result, accountKey){
 }
 
 // CHECK 2 — bank balance continuity
+// A new file may extend the timeline FORWARD (next statement) or BACKWARD (backfill of an
+// earlier period, e.g. uploading a statement's second half after its first). The old check
+// assumed forward-only: it compared the file's opening balance to the NEWEST existing balance,
+// which produced a false "gap" whenever an earlier segment was uploaded. Here we test both ends
+// of the existing balance chain, using the same order-independent chain-link idea as
+// computeAccountGaps: the file connects if its opening links to the existing data's closing
+// (forward) OR its closing links to the existing data's opening (backfill). Overlapping uploads
+// are still handled upstream via pf.hasOverlap.
 function checkBalanceContinuity(result, accountKey){
   const acc=getAllAccounts().find(a=>a.key===accountKey);
   if(!acc||acc.type!=='bank') return {ok:true};
-  if(result.openingBalance==null) return {ok:true};
+  const cents=x=>Math.round(x*100);
   const existing=transactions
-    .filter(t=>t.accountKey===accountKey && t.balance!=null && t.date)
+    .filter(t=>t.accountKey===accountKey && t.balance!=null && t.date && !t.isAdjustment)
     .sort((a,b)=>a.date.localeCompare(b.date));
   if(existing.length===0) return {ok:true};
+
+  const opening=result.openingBalance, closing=result.closingBalance;
+  const oldestDate=existing[0].date, newestDate=existing[existing.length-1].date;
+  const oldestDay=existing.filter(t=>t.date===oldestDate);
+  const newestDay=existing.filter(t=>t.date===newestDate);
+  // Chain-link balance sets at each end of the existing data.
+  const closingAfters =new Set(newestDay.map(t=>cents(t.balance)));                 // balances just AFTER existing data ends
+  const openingBefores=new Set(oldestDay.map(t=>cents(t.balance-(t.amount||0))));   // balances just BEFORE existing data begins
+
+  // Continuous if the file links to EITHER end of the existing chain.
+  if(opening!=null && closingAfters.has(cents(opening)))  return {ok:true};  // forward junction OK
+  if(closing!=null && openingBefores.has(cents(closing))) return {ok:true};  // backfill junction OK
+
+  // No link → decide which junction to report from the file's date position.
+  const fileTo=result.estimatedDateRange&&result.estimatedDateRange.to;       // 'YYYY-MM'
+  const backfill=!!fileTo && fileTo <= oldestDate.slice(0,7);                  // file ends at/before existing data starts
+
+  if(backfill){
+    if(closing==null) return {ok:true};   // can't verify a backfill without a closing balance → stay silent
+    // Existing data's true opening balance (before-balance of the oldest day's first row, order-independent).
+    const aft=new Set(oldestDay.map(t=>cents(t.balance)));
+    const s=oldestDay.find(t=>!aft.has(cents(t.balance-(t.amount||0))))||oldestDay[0];
+    const existOpen=s.balance-(s.amount||0);
+    const gap=Math.round((closing-existOpen)*100)/100;
+    if(Math.abs(gap)<1) return {ok:true};
+    return {ok:false, backfill:true, gap, existDate:oldestDate, existBalance:existOpen, fileBalance:closing};
+  }
+
+  // Forward gap (original behaviour).
+  if(opening==null) return {ok:true};
   const lastKnown=existing[existing.length-1];
-  const gap=Math.round((result.openingBalance - lastKnown.balance)*100)/100;
+  const gap=Math.round((opening-lastKnown.balance)*100)/100;
   if(Math.abs(gap)<1) return {ok:true};
-  return {ok:false, gap, lastKnownBalance:lastKnown.balance, lastKnownDate:lastKnown.date, fileOpeningBalance:result.openingBalance};
+  return {ok:false, backfill:false, gap, existDate:lastKnown.date, existBalance:lastKnown.balance, fileBalance:opening};
 }
 
 // CHECK 3 — credit card charges vs bank
@@ -3578,7 +3616,9 @@ function runValidations(result, accountKey){
   }
   const c2=checkBalanceContinuity(result, accountKey);
   if(!c2.ok) issues.push({type:'balance', severity:'warn',
-    text:`פער ביתרות: היתרה האחרונה הידועה (${c2.lastKnownDate}) ${fmtAmount(c2.lastKnownBalance)}, אך הקובץ נפתח ב-${fmtAmount(c2.fileOpeningBalance)}. פער ${fmtAmount(c2.gap)}.`,
+    text: c2.backfill
+      ? `פער ביתרות: הקובץ (תקופה מוקדמת יותר) נסגר ב-${fmtAmount(c2.fileBalance)}, אך יתרת הפתיחה של הנתונים הקיימים (${c2.existDate}) היא ${fmtAmount(c2.existBalance)}. פער ${fmtAmount(c2.gap)}.`
+      : `פער ביתרות: היתרה האחרונה הידועה (${c2.existDate}) ${fmtAmount(c2.existBalance)}, אך הקובץ נפתח ב-${fmtAmount(c2.fileBalance)}. פער ${fmtAmount(c2.gap)}.`,
     gap:c2.gap});
   const c3=checkCardChargeMatch(result, accountKey);
   if(!c3.ok) issues.push({type:'card_charge', severity:c3.severe?'severe':'warn',
