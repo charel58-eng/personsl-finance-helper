@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.59";
+const APP_VERSION = "2.60";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -3633,6 +3633,42 @@ function runValidations(result, accountKey){
   return issues;
 }
 
+// v2.60: Build the positive post-upload summary lines. Computed from the TRUE post-save state
+// (so an acknowledged gap is reported honestly, not as "OK"). Bank → continuity + date-range
+// coverage; card → charge-match confirmation + linked-bank coverage in months (per user's choice).
+// Each line: {icon, ok:true|false|null, text}. ok=true→green, false→amber, null→neutral.
+function buildUploadSummary(pf, result, accountKey, covered){
+  const acc=getAllAccounts().find(a=>a.key===accountKey);
+  if(!acc) return [];
+  const lines=[];
+  const fmtD=iso=>{ const p=(iso||'').split('-'); return p.length>=3?`${p[2]}/${p[1]}/${p[0]}`:iso; };
+  const fmtM=ym=>{ const p=(ym||'').split('-'); return p.length>=2?`${p[1]}/${p[0]}`:ym; };
+  if(acc.type==='card'){
+    // Message 1 — charge-match check (only claim "תקין" when real bank data matched within 1 ₪)
+    const c3=checkCardChargeMatch(result, accountKey);
+    if(c3.noLink) lines.push({icon:'ℹ️', ok:null, text:'הכרטיס אינו מקושר לחשבון בנק — לא בוצעה בדיקת התאמת חיובים.'});
+    else if(c3.noBankData) lines.push({icon:'ℹ️', ok:null, text:'עדיין אין חיוב תואם בבנק לחודש זה — בדיקת ההתאמה תושלם כשדף הבנק ייקלט.'});
+    else if(c3.ok && c3.cardTotal!=null) lines.push({icon:'✅', ok:true, text:`בדיקת התאמת חיובים — תקין. סך חיובי הכרטיס (${fmtAmount(c3.cardTotal)}) תואם לחיוב בבנק.`});
+    else lines.push({icon:'ℹ️', ok:null, text:'בדיקת התאמת חיובים לא הופעלה.'});
+    // Message 2 — coverage of the LINKED BANK, in months
+    const lb=state.cardBankLinks[accountKey];
+    if(lb){
+      const bm=[...new Set(transactions.filter(t=>t.accountKey===lb && t.date).map(t=>t.date.slice(0,7)))].sort();
+      if(bm.length) lines.push({icon:'🗓️', ok:null, text:`בבנק המקושר «${accountName(lb)}» יש כרגע נתונים לחודשים: ${bm.map(fmtM).join(', ')}.`});
+    }
+  } else if(acc.type==='bank'){
+    // Message 1 — full-account balance continuity (true state after this file was added)
+    const accTx=transactions.filter(t=>t.accountKey===accountKey);
+    const gaps=computeAccountGaps(accTx);
+    if(gaps.length===0) lines.push({icon:'✅', ok:true, text:'בדיקת רציפות — תקין. אין פערים ביתרות.'});
+    else lines.push({icon:'⚠️', ok:false, text:`נמצאו ${gaps.length} פערים ברציפות היתרות — ראה מסך "בדיקת התאמות".`});
+    // Message 2 — coverage of THIS bank account, as a date range
+    const dated=accTx.filter(t=>t.balance!=null && t.date).map(t=>t.date).sort();
+    if(dated.length) lines.push({icon:'📅', ok:null, text:`כרגע יש יתרות בחשבון «${acc.name}» מ-${fmtD(dated[0])} עד ${fmtD(dated[dated.length-1])}.`});
+  }
+  return lines;
+}
+
 async function confirmUpload(fileId){
   const pf=pendingFiles.find(f=>f.fileId===fileId);
   if(!pf||!pf.assignedKey){showToast('⚠️ בחר חשבון תחילה','error');return;}
@@ -3756,24 +3792,48 @@ async function confirmUpload(fileId){
   saveTx();
   const found=discoverCategories();
 
-  pendingDelete(fileId);
-  pendingFiles=pendingFiles.filter(f=>f.fileId!==fileId);
-  document.getElementById('fitem_'+fileId)?.remove();
-  if(typeof renderPendingBanner==='function') renderPendingBanner();
   const mCount=covered.length;
   const baseMsg = skipped>0
     ? `✅ נקלטו ${toAdd.length} פעולות חדשות · ${skipped} כפילויות דולגו`
     : `✅ נשמר! ${mCount} חודשים נקלטו`;
   showToast(`${baseMsg}${found.length?` · ${found.length} קטגוריות חדשות`:''}${signFixes>0?` · ${signFixes} סימנים תוקנו לפי היתרה`:''}`);
-  if(pendingFiles.length===0){
-    // First file for this account whose data starts AFTER the global tracking start →
-    // likely opened mid-period. Ask the user to confirm/adjust the opening month.
-    const earliest=(covered&&covered.length)?[...covered].sort()[0]:'';
-    if(isFirstFile && !(state.accountStarts||{})[pf.assignedKey] && earliest && earliest>state.startDate){
-      setTimeout(()=>openAccStart(pf.assignedKey, earliest, true),900);
-    } else {
-      setTimeout(()=>showDashboard(),1300);
+
+  // v2.60: positive post-upload summary (continuity/charge-match + coverage), shown as a green
+  // block the user dismisses with "המשך" — replaces the previous auto-navigate so it can be read.
+  // Cleanup + navigation are deferred into goNext(), fired by the button (or immediately if no block).
+  const earliest=(covered&&covered.length)?[...covered].sort()[0]:'';
+  const goNext=()=>{
+    pendingDelete(fileId);
+    pendingFiles=pendingFiles.filter(f=>f.fileId!==fileId);
+    document.getElementById('fitem_'+fileId)?.remove();
+    if(typeof renderPendingBanner==='function') renderPendingBanner();
+    if(pendingFiles.length===0){
+      // First file for this account whose data starts AFTER the global tracking start →
+      // likely opened mid-period. Ask the user to confirm/adjust the opening month.
+      if(isFirstFile && !(state.accountStarts||{})[pf.assignedKey] && earliest && earliest>state.startDate){
+        openAccStart(pf.assignedKey, earliest, true);
+      } else {
+        showDashboard();
+      }
     }
+  };
+  const summary=buildUploadSummary(pf, result, pf.assignedKey, covered);
+  const assignDiv=document.getElementById('assign_'+fileId);
+  if(assignDiv && summary.length){
+    const rows=summary.map(l=>{
+      const col=l.ok===true?'var(--green)':l.ok===false?'var(--amber)':'var(--border2)';
+      return `<div style="padding:10px;background:var(--surface3);border-right:3px solid ${col};border-radius:8px;margin-bottom:8px;font-size:12px;line-height:1.5;">${l.icon} ${l.text}</div>`;
+    }).join('');
+    assignDiv.innerHTML=`
+      <div style="padding:12px;background:var(--surface2);border-radius:10px;margin-top:8px;">
+        <div style="font-size:13px;font-weight:700;color:var(--green);margin-bottom:10px;">✅ הקליטה הושלמה</div>
+        ${rows}
+        <button class="btn-confirm-upload" id="usumm_${fileId}" style="margin-top:4px;">המשך ›</button>
+      </div>`;
+    const btn=document.getElementById('usumm_'+fileId);
+    if(btn) btn.onclick=goNext;
+  } else {
+    goNext();
   }
 }
 
