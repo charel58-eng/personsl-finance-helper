@@ -48,7 +48,7 @@ window.dispatchEvent(new Event('fbReady'));
 //  🔒 מפתח ה-API כבר לא נמצא כאן — הוא נשמר בצד השרת (Cloud Function), בכספת מאובטחת.
 //  שנה את סיסמת הכניסה אם תרצה
 const APP_PASSWORD = "hrhr1978";
-const APP_VERSION = "2.60";
+const APP_VERSION = "2.61";
 window.APP_PASSWORD = APP_PASSWORD;
 window.APP_VERSION = APP_VERSION;
 
@@ -139,7 +139,7 @@ button{cursor:pointer;}
 
 /* ── DASHBOARD ── */
 #screen-dashboard{padding-bottom:calc(80px + env(safe-area-inset-bottom));}
-.db-topbar{padding:58px 20px 0;display:flex;align-items:center;justify-content:space-between;}
+.db-topbar{padding:12px 20px 0;display:flex;align-items:center;justify-content:space-between;}
 .db-greeting{font-size:20px;font-weight:800;}
 .db-greeting span{color:var(--green);}
 .icon-btn{width:40px;height:40px;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;}
@@ -298,7 +298,10 @@ button{cursor:pointer;}
 
 /* ── UPLOAD SCREEN ── */
 #screen-upload{padding-bottom:calc(80px + env(safe-area-inset-bottom));}
-.upload-header{padding:58px 20px 0;display:flex;align-items:center;gap:12px;}
+/* v2.61: all screens with a page header start below the fixed user-bar */
+#screen-upload,#screen-settings,#screen-set-banks,#screen-set-cards,#screen-set-cats,#screen-set-notes,#screen-set-files,#screen-set-dups,#screen-set-general,#screen-reports,#screen-dashboard,#screen-onboarding{padding-top:calc(env(safe-area-inset-top,0px) + var(--userbar-h));}
+/* v2.61: sticky page header — back button stays visible while scrolling (same pattern as .rec-sticky) */
+.upload-header{position:sticky;top:calc(env(safe-area-inset-top,0px) + var(--userbar-h));z-index:40;background:rgba(9,10,18,0.97);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:12px;}
 .back-btn{width:40px;height:40px;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;color:var(--text);flex-shrink:0;}
 .page-title{font-size:18px;font-weight:800;}
 
@@ -410,7 +413,7 @@ button{cursor:pointer;}
 /* ── MODAL ── */
 .modal-overlay{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.75);display:none;align-items:flex-end;justify-content:center;backdrop-filter:blur(4px);}
 .modal-overlay.open{display:flex;}
-.modal-box{background:var(--surface);border:1.5px solid var(--border2);border-radius:24px 24px 0 0;padding:24px 20px calc(32px + env(safe-area-inset-bottom));width:100%;max-width:480px;animation:slideUp .25s ease;}
+.modal-box{background:var(--surface);border:1.5px solid var(--border2);border-radius:24px 24px 0 0;padding:24px 20px calc(32px + env(safe-area-inset-bottom));width:100%;max-width:480px;animation:slideUp .25s ease;max-height:calc(100dvh - env(safe-area-inset-top,0px) - 32px);overflow-y:auto;-webkit-overflow-scrolling:touch;}
 @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 .modal-title{font-size:18px;font-weight:800;margin-bottom:16px;text-align:center;}
 .modal-input{width:100%;background:var(--surface2);border:1.5px solid var(--border2);border-radius:12px;padding:13px 14px;font-size:18px;color:var(--text);direction:ltr;text-align:center;letter-spacing:6px;margin-bottom:10px;}
@@ -480,7 +483,7 @@ button{cursor:pointer;}
 .cat-modal-icon{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;background:var(--surface2);}
 .cat-modal-title{font-size:18px;font-weight:800;}
 .cat-modal-sub{font-size:13px;color:var(--text2);margin-top:2px;}
-.cat-modal-suppliers{display:flex;flex-direction:column;gap:8px;}
+.cat-modal-suppliers{display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow-y:auto;-webkit-overflow-scrolling:touch;}
 .supplier-row{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface2);border-radius:12px;}
 .supplier-left{display:flex;align-items:center;gap:10px;min-width:0;}
 .supplier-rank{width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;}
@@ -536,13 +539,13 @@ button{cursor:pointer;}
 .insight-text strong{color:var(--green);}
 .insight-text.warn strong{color:var(--amber);}
 
-.toast{position:fixed;top:env(safe-area-inset-top,16px);left:50%;transform:translateX(-50%) translateY(-100px);z-index:300;background:var(--surface);border:1.5px solid var(--green-glow);border-radius:12px;padding:11px 20px;font-size:14px;font-weight:600;color:var(--green);transition:transform .3s ease;white-space:nowrap;max-width:90vw;box-shadow:0 4px 24px rgba(0,0,0,0.4);}
+.toast{position:fixed;top:calc(env(safe-area-inset-top,0px) + var(--userbar-h) + 8px);left:50%;transform:translateX(-50%) translateY(-100px);z-index:300;background:var(--surface);border:1.5px solid var(--green-glow);border-radius:12px;padding:11px 20px;font-size:14px;font-weight:600;color:var(--green);transition:transform .3s ease;white-space:nowrap;max-width:90vw;box-shadow:0 4px 24px rgba(0,0,0,0.4);}
 .toast.show{transform:translateX(-50%) translateY(0);}
 .toast.error{border-color:var(--red-glow);color:var(--red);}
 .toast.info{border-color:var(--blue-glow);color:var(--blue);}
 
 /* ── AI CHAT ── */
-#screen-chat{height:100dvh;max-height:100dvh;box-sizing:border-box;overflow:hidden;padding-bottom:calc(72px + env(safe-area-inset-bottom));}
+#screen-chat{height:100dvh;max-height:100dvh;box-sizing:border-box;overflow:hidden;padding-top:calc(env(safe-area-inset-top,0px) + var(--userbar-h));padding-bottom:calc(72px + env(safe-area-inset-bottom));}
 .chat-header{padding:18px 20px 12px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);}
 .chat-ai-avatar{width:40px;height:40px;background:var(--purple-dim);border:1.5px solid rgba(184,74,255,0.3);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
 .chat-title{font-size:16px;font-weight:800;}
